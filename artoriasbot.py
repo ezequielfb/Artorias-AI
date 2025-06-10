@@ -3,100 +3,81 @@
 
 import sys
 import traceback
-from datetime import datetime
-from typing import Any, Dict
+# As importações abaixo foram removidas pois não são usadas na nova arquitetura:
+# from datetime import datetime
+# from typing import Any, Dict
+# from botbuilder.core import ActivityHandler, TurnContext, MessageFactory, UserState, ConversationState
+# from botbuilder.schema import ChannelAccount, ActivityTypes
+# from config import DefaultConfig
 
-from botbuilder.core import (
-    ActivityHandler, TurnContext, MessageFactory, UserState,
-    ConversationState
-)
-from botbuilder.schema import ChannelAccount, ActivityTypes # Removidas Attachment, ActionTypes, CardAction
-
-# Importações para o Gemini
+# Importações essenciais para o Gemini
 import google.generativeai as genai
 import os # Para acessar variáveis de ambiente
 
-# Importações de configuração (se ainda precisar de CONFIG aqui)
-from config import DefaultConfig
+class Artoriasbot: # Não herda mais de ActivityHandler
+    def __init__(self):
+        self.conversation_states = {} # Dicionário para simular estado por ID de usuário/conversa
 
-class Artoriasbot(ActivityHandler): # Renomeado para Artoriasbot
-    def __init__(self, conversation_state: ConversationState, user_state: UserState):
-        if conversation_state is None:
-            raise TypeError(
-                "[ArtoriasBot]: Missing parameter. conversation_state is required"
-            )
-        if user_state is None:
-            raise TypeError("[ArtoriasBot]: Missing parameter. user_state is required")
-
-        self.conversation_state = conversation_state
-        self.user_state = user_state
-        self.conversation_flow_accessor = self.conversation_state.create_property("ConversationFlow")
-        self.user_profile_accessor = self.user_state.create_property("UserProfile")
-
+        # Configuração da API do Gemini
         gemini_api_key = os.environ.get("GEMINI_API_KEY")
         if not gemini_api_key:
             raise ValueError("GEMINI_API_KEY não configurada nas variáveis de ambiente.")
         genai.configure(api_key=gemini_api_key)
         
-        self.gemini_model = genai.GenerativeModel('gemini-pro')
+        # Usando o modelo 'gemini-2.0-flash' conforme o log do curl
+        self.gemini_model = genai.GenerativeModel('gemini-2.0-flash')
         print("Artoriasbot: Modelo Gemini inicializado com sucesso.")
 
 
-    async def on_turn(self, turn_context: TurnContext):
-        print(f"ON_TURN: Activity Type: {turn_context.activity.type}, User ID: {turn_context.activity.from_property.id}")
+    async def process_message(self, user_message: str, user_id: str = "default_user") -> str:
+        """
+        Processa uma mensagem de texto do usuário e retorna uma resposta.
+        Esta é a nova função principal do seu bot.
+        """
+        print(f"Artoriasbot: Processando mensagem de '{user_id}': '{user_message}'")
 
-        await super().on_turn(turn_context)
-
-        await self.conversation_state.save_changes(turn_context, False)
-        await self.user_state.save_changes(turn_context, False)
-
-    async def on_members_added_activity(
-        self, members_added: list[ChannelAccount], turn_context: TurnContext
-    ):
-        print("ON_MEMBERS_ADDED_ACTIVITY: Novo membro adicionado.")
-        for member in members_added:
-            if member.id != turn_context.activity.recipient.id:
-                welcome_text = ("Saudações, sou Artorias AI! Seu guardião inteligente para assistência e qualificação de leads. "
-                                "Como posso servi-lo hoje? Posso responder perguntas, conectar você com um especialista ou ajudar com automações.")
-                await turn_context.send_activity(MessageFactory.text(welcome_text))
-                
-                await self.conversation_flow_accessor.set(turn_context, {"state": "initial"})
-                await self.user_profile_accessor.set(turn_context, {})
-
-    async def on_message_activity(self, turn_context: TurnContext):
-        user_message = turn_context.activity.text
-        print(f"ON_MESSAGE_ACTIVITY: Mensagem do usuário: '{user_message}'")
-
-        current_flow_state = await self.conversation_flow_accessor.get(turn_context, {"state": "initial"})
-        user_profile = await self.user_profile_accessor.get(turn_context, {})
-
-        response_text = "Desculpe, ainda estou aprendendo. Por favor, reformule sua pergunta."
+        current_flow_state = self.conversation_states.get(user_id, {"state": "initial", "history": []})
+        
+        response_text = "Desculpe, não consegui processar sua requisição no momento. Tente novamente."
         
         try:
-            prompt = f"""
-            Você é Artorias AI, um assistente inteligente para a Tralhotec. Sua função principal é:
-            1. Responder perguntas gerais sobre a empresa e seus serviços (preços, implementação, etc.).
-            2. Qualificar leads para o time de SDR (Sales Development Representative), coletando informações como nome, função, empresa, desafios e tamanho da empresa.
-            3. Encaminhar para o suporte técnico se o usuário tiver um problema.
+            # Contexto do sistema para o Gemini (pode ser parte do history, ou passado via um prompt de sistema)
+            system_instruction = (
+                f"Você é Artorias AI, um assistente inteligente para a Tralhotec. Sua função principal é:\n"
+                f"1. Responder perguntas gerais sobre a empresa e seus serviços (preços, implementação, etc.).\n"
+                f"2. Qualificar leads para o time de SDR, coletando nome, função, empresa, desafios e tamanho da empresa.\n"
+                f"3. Encaminhar para o suporte técnico se o usuário tiver um problema.\n"
+                f"4. Mantenha as respostas concisas e no máximo 3 frases.\n"
+                f"5. Se precisar de uma informação do usuário, faça a pergunta diretamente.\n"
+                f"6. Se for um SDR, peça nome e função primeiro.\n"
+                f"7. Se for suporte, peça a descrição do problema.\n"
+                f"---"
+            )
 
-            Considere o histórico da conversa (se houver, adicione aqui o histórico real da conversa) e o estado atual do fluxo: {current_flow_state.get('state', 'initial')}.
-
-            Mensagem do usuário: "{user_message}"
-
-            Com base na mensagem do usuário e no contexto, por favor, responda de forma concisa e útil. Se for uma pergunta de qualificação de SDR ou suporte, faça a próxima pergunta necessária ou informe o próximo passo.
-            """
-
-            gemini_response = self.gemini_model.generate_content(prompt)
+            # Inicializa (ou continua) a sessão de chat com o Gemini.
+            # O 'history' deve ser no formato que a API do Gemini espera (roles e parts).
+            chat_session = self.gemini_model.start_chat(history=current_flow_state["history"])
             
+            # Envia a mensagem do usuário, combinando com a instrução do sistema no prompt.
+            # A API send_message adiciona a mensagem do usuário e a resposta do modelo ao histórico da sessão.
+            gemini_response = chat_session.send_message(system_instruction + "\n" + user_message) # <-- Removido o 'await'
+
             if gemini_response and gemini_response.candidates:
                 response_text = gemini_response.candidates[0].content.parts[0].text
+                # Atualiza nosso histórico local com o histórico da sessão do Gemini
+                current_flow_state["history"] = [
+                    {"role": entry.role, "parts": [part.text for part in entry.parts if hasattr(part, 'text')]}
+                    for entry in chat_session.history
+                ]
             else:
                 response_text = "Não consegui gerar uma resposta inteligente no momento. Por favor, tente novamente."
+
+            # Atualiza o estado da conversa local (em memória)
+            self.conversation_states[user_id] = current_flow_state
 
         except Exception as e:
             print(f"ERRO: Falha ao chamar a API do Gemini: {e}")
             traceback.print_exc(file=sys.stdout)
             response_text = "Desculpe, estou com dificuldades técnicas no momento. Por favor, tente novamente mais tarde."
 
-        await turn_context.send_activity(MessageFactory.text(response_text))
-        print(f"ON_MESSAGE_ACTIVITY: Bot respondeu: '{response_text}'")
+        return response_text

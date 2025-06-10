@@ -1,100 +1,71 @@
 from flask import Flask, request, jsonify
-from botbuilder.core import BotFrameworkAdapter, BotFrameworkAdapterSettings, TurnContext, ConversationState, UserState, MemoryStorage
-from botbuilder.schema import Activity
-from artoriasbot import Artoriasbot # <-- CORRIGIDO: Importa Artoriasbot
-from config import DefaultConfig
-import asyncio
+import os
+from dotenv import load_dotenv
 import traceback
-import os 
-from dotenv import load_dotenv # <-- Adicionado para carregar variáveis de ambiente de .env
+import asyncio # Importa o módulo asyncio
+
+# Importa o seu bot Artorias AI.
+from artoriasbot import Artoriasbot
 
 # Carrega as variáveis de ambiente do arquivo .env
-load_dotenv() 
+load_dotenv()
 
 app = Flask(__name__)
 
-CONFIG = DefaultConfig()
+# --- Inicialização do Artoriasbot ---
+try:
+    BOT = Artoriasbot()
+    print("Artoriasbot inicializado com sucesso.")
+except Exception as e:
+    print(f"ERRO CRÍTICO: Falha ao inicializar o Artoriasbot: {e}")
+    traceback.print_exc()
+    exit(1) # Sai do programa
 
-SETTINGS = BotFrameworkAdapterSettings(
-    os.environ.get("MicrosoftAppId", ""),
-    os.environ.get("MicrosoftAppPassword", "")
-)
-
-class CustomBotFrameworkAdapter(BotFrameworkAdapter):
-    def __init__(self, settings: BotFrameworkAdapterSettings):
-        super().__init__(settings)
-        self._prod_service_url = "https://" + (os.environ.get("RENDER_EXTERNAL_HOSTNAME") or "")
-        if not os.environ.get("RENDER_EXTERNAL_HOSTNAME"):
-             print("AVISO: Variável de ambiente RENDER_EXTERNAL_HOSTNAME não encontrada. Pode afetar respostas em produção.")
-        print(f"ADAPTER: _prod_service_url inicializado como: {self._prod_service_url}")
-
-    async def get_service_url(self, turn_context: TurnContext) -> str:
-        service_url = turn_context.activity.service_url
-
-        if self._prod_service_url and ("localhost" in service_url or not service_url):
-            print(f"ADAPTER: serviceUrl '{service_url}' da atividade substituído por '{self._prod_service_url}'")
-            return self._prod_service_url
-        
-        print(f"ADAPTER: Usando serviceUrl da atividade: '{service_url}'")
-        return service_url
-
-ADAPTER = CustomBotFrameworkAdapter(SETTINGS)
-
-
-MEMORY = MemoryStorage()
-CONVERSATION_STATE = ConversationState(MEMORY)
-USER_STATE = UserState(MEMORY)
-
-# Removida a inicialização do cliente CLU
-BOT = Artoriasbot( # <-- CORRIGIDO: Instancia Artoriasbot
-    CONVERSATION_STATE,
-    USER_STATE
-)
 
 @app.route("/api/messages", methods=["POST"])
 def messages():
-    if "application/json" not in request.headers.get("Content-Type", ""):
-        return jsonify({"error": "Tipo de conteúdo não suportado"}), 415
+    """
+    Endpoint HTTP para receber mensagens do usuário.
+    Espera um JSON com um campo 'text' (ou 'message'/'content', podemos padronizar).
+    """
+    if not request.is_json:
+        return jsonify({"error": "Content-Type deve ser application/json"}), 415
 
     try:
-        body = request.json
-    except Exception as e:
-        print(f"Erro ao parsear JSON: {e}")
-        traceback.print_exc()
-        return jsonify({"error": "Bad Request - JSON Inválido"}), 400
-
-    activity = Activity().deserialize(body)
-    auth_header = request.headers.get("Authorization", "")
-
-    # --- MODIFICAÇÃO PRINCIPAL AQUI: Como lidar com asyncio em Flask ---
-    try:
-        # Pega o loop de eventos corrente. Se não houver um, cria um novo para a Thread atual.
-        # Isso é mais robusto para uso em ambientes como o Gunicorn ou o servidor de desenvolvimento do Flask.
-        loop = asyncio.get_event_loop()
+        data = request.get_json()
+        user_message = data.get("text") # Ou 'message', ou 'content'
         
-        # Cria uma "tarefa" assíncrona para processar a atividade do bot.
-        # NÃO usamos asyncio.run() aqui diretamente, pois o Flask já está rodando em um loop/thread.
-        loop.run_until_complete(ADAPTER.process_activity(activity, auth_header, BOT.on_turn))
+        if not user_message:
+            return jsonify({"error": "Campo 'text' (ou 'message') não encontrado na requisição"}), 400
 
-    except RuntimeError as e:
-        # Se um loop já estiver rodando e não pudermos usar run_until_complete,
-        # tentamos agendar a tarefa no loop existente.
-        print(f"RuntimeError ou Loop já rodando: {e}. Tentando agendar a tarefa no loop existente...")
-        traceback.print_exc()
+        print(f"Flask: Mensagem recebida do usuário: '{user_message}'")
+
+        # --- Como lidar com asyncio em Flask ---
         try:
-            current_loop = asyncio.get_running_loop() # Tenta pegar o loop que está rodando
-            current_loop.create_task(ADAPTER.process_activity(activity, auth_header, BOT.on_turn))
-            print("Tarefa assíncrona agendada com sucesso no loop existente.")
-        except RuntimeError:
-            print("ERRO CRÍTICO: Não foi possível obter ou agendar a tarefa assíncrona. Nenhum loop de eventos rodando ou erro no agendamento.")
-            return jsonify({"error": "Erro interno no servidor: Falha ao agendar processamento do bot."}), 500
-    except Exception as e:
-        print(f"Erro inesperado durante o processamento da atividade: {e}")
-        traceback.print_exc()
-        return jsonify({"error": "Erro interno no servidor durante processamento do bot."}), 500
+            # Pega o loop de eventos corrente, ou cria um novo se não houver um na thread.
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError: # Se não há um loop rodando na thread atual, cria um.
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            
+            # Chama o método process_message do Artoriasbot e espera ele completar
+            # Passamos um ID de usuário fixo por enquanto para testes locais.
+            bot_response_text = loop.run_until_complete(BOT.process_message(user_message, user_id="test_user_123"))
+            
+        except Exception as e:
+            print(f"ERRO: Falha ao processar a requisição no loop assíncrono: {e}")
+            traceback.print_exc()
+            return jsonify({"error": "Erro interno do servidor ao processar a mensagem."}), 500
 
-    return jsonify({"status": "Solicitação recebida, processamento iniciado."}), 201
+        print(f"Flask: Resposta do bot: '{bot_response_text}'")
+        return jsonify({"response": bot_response_text}), 200
+
+    except Exception as e:
+        print(f"ERRO: Falha ao processar a requisição HTTP: {e}")
+        traceback.print_exc()
+        return jsonify({"error": "Erro interno do servidor ao lidar com a requisição."}), 500
 
 if __name__ == '__main__':
-    print("Iniciando servidor de desenvolvimento Flask (apenas para testes locais)...")
+    print("Iniciando servidor Flask para Artorias AI (desenvolvimento)...")
     app.run(host="0.0.0.0", port=3979, debug=True)
