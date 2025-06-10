@@ -2,7 +2,7 @@ import sys
 import traceback
 import google.generativeai as genai
 import os
-import json # <-- Adicionado para lidar com JSON
+import json
 
 class Artoriasbot:
     def __init__(self):
@@ -13,7 +13,7 @@ class Artoriasbot:
             raise ValueError("GEMINI_API_KEY não configurada nas variáveis de ambiente.")
         genai.configure(api_key=gemini_api_key)
         
-        self.gemini_model = genai.GenerativeModel('gemini-2.0-flash')
+        self.gemini_model = genai.Generativeai.GenerativeModel('gemini-2.0-flash') # Certifique-se que é 'gemini-2.0-flash'
         print("Artoriasbot: Modelo Gemini inicializado com sucesso.")
 
     async def process_message(self, user_message: str, user_id: str = "default_user") -> str:
@@ -22,10 +22,12 @@ class Artoriasbot:
         current_flow_state = self.conversation_states.get(user_id, {"state": "initial", "history": []})
         
         response_text = "Desculpe, não consegui processar sua requisição no momento. Tente novamente."
-        extracted_data = {} # Dicionário para armazenar dados extraídos
+        extracted_data = {} 
 
         try:
             # INSTRUÇÕES ATUALIZADAS PARA SAÍDA ESTRUTURADA E FLUXOS
+            # AQUI: Pedimos explicitamente para o Gemini primeiro dar a resposta em linguagem natural,
+            # E SÓ DEPOIS incluir o JSON.
             system_instruction = (
                 f"Você é Artorias AI, um assistente inteligente para a Tralhotec, uma empresa de soluções de TI.\n"
                 f"Suas responsabilidades são:\n"
@@ -35,7 +37,7 @@ class Artoriasbot:
                 f"    b. Nome da empresa.\n"
                 f"    c. Principais desafios/necessidades.\n"
                 f"    d. Tamanho da empresa (Ex: até 10, 11-50, 50+).\n"
-                f"    Após coletar todas as informações, **e SOMENTE APÓS TODAS AS INFORMAÇÕES serem coletadas**, inclua um bloco JSON no final da sua resposta de texto, formatado assim:\n"
+                f"    Ao final do fluxo SDR (todas as informações coletadas), forneça a resposta de texto final para o usuário e, em uma nova linha, **então adicione o bloco JSON**.\n"
                 f"    ```json\n"
                 f"    {{\"action\": \"sdr_completed\", \"lead_info\": {{\"nome\": \"[Nome]\", \"funcao\": \"[Funcao]\", \"empresa\": \"[Empresa]\", \"desafios\": \"[Desafios]\", \"tamanho\": \"[Tamanho]\"}}}}\n"
                 f"    ```\n"
@@ -43,7 +45,7 @@ class Artoriasbot:
                 f"3.  **Suporte Técnico:** Se o usuário tiver um problema técnico ou precisar de ajuda, inicie o processo de suporte. Colete:\n"
                 f"    a. Descrição detalhada do problema.\n"
                 f"    b. Informações de contato (nome, e-mail, empresa) se for necessária escalada (peça após a descrição do problema).\n"
-                f"    Após coletar o problema e as informações de contato, **e SOMENTE APÓS AMBAS AS INFORMAÇÕES serem coletadas**, inclua um bloco JSON no final da sua resposta de texto, formatado assim:\n"
+                f"    Ao final do fluxo de Suporte (problema e contato coletados), forneça a resposta de texto final para o usuário e, em uma nova linha, **então adicione o bloco JSON**.\n"
                 f"    ```json\n"
                 f"    {{\"action\": \"support_escalated\", \"ticket_info\": {{\"problema\": \"[Problema]\", \"nome_contato\": \"[Nome Contato]\", \"email_contato\": \"[Email Contato]\", \"empresa_contato\": \"[Empresa Contato]\"}}}}\n"
                 f"    ```\n"
@@ -70,24 +72,45 @@ class Artoriasbot:
 
             if gemini_response and gemini_response.candidates:
                 response_content = gemini_response.candidates[0].content.parts[0].text
-                response_text = response_content 
+                response_text = response_content # <-- Inicializa response_text com todo o conteúdo
                 
-                # --- NOVA LÓGICA DE EXTRAÇÃO DE JSON ---
-                # Procura por um bloco de código JSON na resposta do Gemini
-                json_start = response_content.find("```json")
-                json_end = response_content.find("```", json_start + 1)
+                # --- Lógica de EXTRAÇÃO DE JSON ---
+                json_start_tag = "```json"
+                json_end_tag = "```"
+                json_start_index = response_content.find(json_start_tag)
+                json_end_index = -1
 
-                if json_start != -1 and json_end != -1:
-                    json_str = response_content[json_start + 7:json_end].strip()
+                if json_start_index != -1:
+                    # Tenta encontrar o final do bloco JSON a partir do início do bloco
+                    json_end_index = response_content.find(json_end_tag, json_start_index + len(json_start_tag))
+                
+                if json_start_index != -1 and json_end_index != -1:
+                    json_str = response_content[json_start_index + len(json_start_tag):json_end_index].strip()
                     try:
                         extracted_data = json.loads(json_str)
                         print(f"Artoriasbot: JSON extraído: {extracted_data}")
-                        # Opcional: Remover o bloco JSON da resposta textual para o usuário
-                        response_text = response_content[:json_start].strip() 
+                        
+                        # Remove o bloco JSON da resposta textual para o usuário
+                        # Pega a parte antes do JSON e a parte depois do JSON (se houver)
+                        response_text = response_content[:json_start_index].strip()
+                        # Se houver texto após o JSON, você pode decidir incluí-lo ou não.
+                        # Por enquanto, vamos ignorar texto após o JSON para manter o foco na mensagem antes.
+                        
+                        # Se a parte textual antes do JSON estiver vazia, forneça uma resposta padrão ou final
+                        if not response_text:
+                            if "sdr_completed" in extracted_data.get("action", ""):
+                                response_text = "Perfeito! Agradeço as informações. Um dos nossos SDRs entrará em contato em breve para agendar uma conversa com um consultor de vendas."
+                            elif "support_escalated" in extracted_data.get("action", ""):
+                                response_text = "Obrigado! Sua solicitação de suporte foi encaminhada para nossa equipe. Eles entrarão em contato em breve."
+                            else:
+                                response_text = "Concluído! Agradeço as informações."
+
+
                     except json.JSONDecodeError as e:
                         print(f"Artoriasbot: ERRO ao parsear JSON: {e}")
                         extracted_data = {} # Resetar se houver erro no JSON
-                # --- FIM DA NOVA LÓGICA DE EXTRAÇÃO DE JSON ---
+                        # Se o parsing falhar, a response_text manterá o conteúdo original (com o JSON ilegível).
+                # --- FIM DA LÓGICA DE EXTRAÇÃO DE JSON ---
 
                 # Atualiza nosso histórico local com o histórico da sessão do Gemini.
                 current_flow_state["history"] = [
@@ -100,9 +123,6 @@ class Artoriasbot:
             # Atualiza o estado da conversa local (em memória)
             self.conversation_states[user_id] = current_flow_state
 
-            # Retornar apenas a resposta textual para o usuário.
-            # O 'extracted_data' pode ser usado aqui para acionar outras ações (n8n, etc.)
-            # Mas, por enquanto, ele apenas será logado.
             return response_text
 
         except Exception as e:
