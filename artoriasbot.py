@@ -29,7 +29,7 @@ class Artoriasbot: # Não herda mais de ActivityHandler
         print("Artoriasbot: Modelo Gemini inicializado com sucesso.")
 
 
-    async def process_message(self, user_message: str, user_id: str = "default_user") -> str:
+async def process_message(self, user_message: str, user_id: str = "default_user") -> str:
         """
         Processa uma mensagem de texto do usuário e retorna uma resposta.
         Esta é a nova função principal do seu bot.
@@ -41,30 +41,59 @@ class Artoriasbot: # Não herda mais de ActivityHandler
         response_text = "Desculpe, não consegui processar sua requisição no momento. Tente novamente."
         
         try:
-            # Contexto do sistema para o Gemini (pode ser parte do history, ou passado via um prompt de sistema)
+            # Contexto do sistema para o Gemini: Define o papel do bot e suas responsabilidades.
+            # INSTRUÇÕES ATUALIZADAS PARA SAÍDA ESTRUTURADA E FLUXOS
             system_instruction = (
-                f"Você é Artorias AI, um assistente inteligente para a Tralhotec. Sua função principal é:\n"
-                f"1. Responder perguntas gerais sobre a empresa e seus serviços (preços, implementação, etc.).\n"
-                f"2. Qualificar leads para o time de SDR, coletando nome, função, empresa, desafios e tamanho da empresa.\n"
-                f"3. Encaminhar para o suporte técnico se o usuário tiver um problema.\n"
-                f"4. Mantenha as respostas concisas e no máximo 3 frases.\n"
-                f"5. Se precisar de uma informação do usuário, faça a pergunta diretamente.\n"
-                f"6. Se for um SDR, peça nome e função primeiro.\n"
-                f"7. Se for suporte, peça a descrição do problema.\n"
+                f"Você é Artorias AI, um assistente inteligente para a Tralhotec, uma empresa de soluções de TI.\n"
+                f"Suas responsabilidades são:\n"
+                f"1.  **Atendimento Geral (FAQ):** Responda perguntas sobre preços, implementação, Microsoft Teams, gestão de documentação e contratos. Se for uma pergunta de FAQ, forneça a resposta diretamente.\n"
+                f"2.  **Qualificação SDR:** Se o usuário demonstrar interesse em vendas, orçamentos, propostas, ou falar com um especialista/consultor de vendas, inicie o processo de qualificação de SDR. Colete as seguintes informações sequencialmente:\n"
+                f"    a. Nome completo e função/cargo.\n"
+                f"    b. Nome da empresa.\n"
+                f"    c. Principais desafios/necessidades.\n"
+                f"    d. Tamanho da empresa (Ex: até 10, 11-50, 50+).\n"
+                f"    Após coletar todas as informações, informe que um SDR entrará em contato.\n"
+                f"3.  **Suporte Técnico:** Se o usuário tiver um problema técnico ou precisar de ajuda, inicie o processo de suporte. Colete:\n"
+                f"    a. Descrição detalhada do problema.\n"
+                f"    b. Informações de contato (nome, e-mail, empresa) se for necessária escalada (peça após a descrição do problema).\n"
+                f"    Após coletar o problema e as informações de contato, informe que o ticket será encaminhado para a equipe de suporte.\n"
+                f"4.  **Comportamento:**\n"
+                f"    - Mantenha um tom profissional e útil.\n"
+                f"    - Seja conciso. Limite suas respostas a 3 frases, a menos que uma explicação mais completa seja solicitada ou necessária para o fluxo.\n"
+                f"    - Guie o usuário suavemente pelos fluxos de SDR ou Suporte, pedindo uma informação por vez.\n"
+                f"    - Se não entender, peça para o usuário reformular.\n"
+                f"    - Se o usuário se despedir ou agradecer, responda de forma cordial e encerre o tópico.\n"
                 f"---"
             )
 
-            # Inicializa (ou continua) a sessão de chat com o Gemini.
-            # O 'history' deve ser no formato que a API do Gemini espera (roles e parts).
-            chat_session = self.gemini_model.start_chat(history=current_flow_state["history"])
+            # O histórico de chat deve ser passado para o Gemini para manter o contexto.
+            # O sistema instruction pode ser a primeira entrada do histórico para o Gemini.
+            if not current_flow_state["history"]:
+                gemini_history = [
+                    {"role": "user", "parts": [{"text": system_instruction}]},
+                    {"role": "model", "parts": [{"text": "Entendido. Estou pronto para ajudar a Tralhotec. Como posso iniciar?"}]}
+                ]
+            else:
+                gemini_history = current_flow_state["history"]
             
-            # Envia a mensagem do usuário, combinando com a instrução do sistema no prompt.
-            # A API send_message adiciona a mensagem do usuário e a resposta do modelo ao histórico da sessão.
-            gemini_response = chat_session.send_message(system_instruction + "\n" + user_message) # <-- Removido o 'await'
+            # Inicia a sessão de chat com o histórico construído
+            chat_session = self.gemini_model.start_chat(history=gemini_history)
+            
+            # Envia a nova mensagem do usuário para a sessão de chat.
+            gemini_response = chat_session.send_message(user_message)
 
             if gemini_response and gemini_response.candidates:
-                response_text = gemini_response.candidates[0].content.parts[0].text
-                # Atualiza nosso histórico local com o histórico da sessão do Gemini
+                response_content = gemini_response.candidates[0].content.parts[0].text
+                response_text = response_content # Por enquanto, a resposta é apenas o texto
+                
+                # Vamos tentar fazer o Gemini retornar um JSON no início da resposta.
+                # Esta é uma técnica de prompt, e o Gemini não GARANTE que seguirá,
+                # mas é um passo para entender como extrair dados estruturados.
+                # Exemplo: { "action": "sdr_qualify", "next_step": "ask_name", "response": "Claro! Para começarmos, qual seu nome e função?" }
+                # Mas para a primeira iteração, vamos apenas focar na resposta em texto.
+                # A lógica de parsing JSON será um próximo passo.
+
+                # Atualiza nosso histórico local com o histórico da sessão do Gemini.
                 current_flow_state["history"] = [
                     {"role": entry.role, "parts": [part.text for part in entry.parts if hasattr(part, 'text')]}
                     for entry in chat_session.history
