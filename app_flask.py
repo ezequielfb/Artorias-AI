@@ -2,7 +2,8 @@ from flask import Flask, request, jsonify
 import os
 from dotenv import load_dotenv
 import traceback
-import asyncio # Importa o módulo asyncio
+import asyncio
+from flask_cors import CORS # <-- ADICIONADO: Importa a extensão Flask-CORS
 
 # Importa o seu bot Artorias AI.
 from artoriasbot import Artoriasbot
@@ -11,6 +12,7 @@ from artoriasbot import Artoriasbot
 load_dotenv()
 
 app = Flask(__name__)
+CORS(app) # <-- ADICIONADO: Inicializa CORS para a sua aplicação Flask
 
 # --- Inicialização do Artoriasbot ---
 try:
@@ -22,12 +24,18 @@ except Exception as e:
     exit(1) # Sai do programa
 
 
-@app.route("/api/messages", methods=["POST"])
+@app.route("/api/messages", methods=["POST", "OPTIONS"]) # <-- ATUALIZADO: Adiciona 'OPTIONS' aqui
 def messages():
     """
     Endpoint HTTP para receber mensagens do usuário.
     Espera um JSON com um campo 'text' (ou 'message'/'content', podemos padronizar).
     """
+    # A requisição OPTIONS é um "preflight" do CORS.
+    # Se o navegador fez um OPTIONS, apenas retorne OK com os cabeçalhos CORS (Flask-CORS cuida disso).
+    if request.method == 'OPTIONS':
+        return '', 200 # Responde OK para o OPTIONS e Flask-CORS adiciona os cabeçalhos necessários
+
+
     if not request.is_json:
         return jsonify({"error": "Content-Type deve ser application/json"}), 415
 
@@ -42,15 +50,12 @@ def messages():
 
         # --- Como lidar com asyncio em Flask ---
         try:
-            # Pega o loop de eventos corrente, ou cria um novo se não houver um na thread.
             try:
                 loop = asyncio.get_event_loop()
-            except RuntimeError: # Se não há um loop rodando na thread atual, cria um.
+            except RuntimeError:
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
             
-            # Chama o método process_message do Artoriasbot e espera ele completar
-            # Passamos um ID de usuário fixo por enquanto para testes locais.
             bot_response_text = loop.run_until_complete(BOT.process_message(user_message, user_id="test_user_123"))
             
         except Exception as e:

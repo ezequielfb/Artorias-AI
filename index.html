@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Artorias AI - Webchat</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #f0f2f5;
+            margin: 0;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        .chat-container {
+            width: 100%;
+            max-width: 500px;
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            height: 70vh; /* Altura fixa para a janela de chat */
+            min-height: 400px;
+        }
+        .chat-header {
+            background-color: #333;
+            color: #fff;
+            padding: 15px;
+            text-align: center;
+            font-size: 1.2em;
+            font-weight: bold;
+        }
+        .chat-messages {
+            flex-grow: 1;
+            padding: 20px;
+            overflow-y: auto;
+            border-bottom: 1px solid #eee;
+            background-color: #e9ebee;
+        }
+        .message-bubble {
+            max-width: 80%;
+            padding: 10px 15px;
+            border-radius: 20px;
+            margin-bottom: 10px;
+            line-height: 1.4;
+        }
+        .message-bubble.user {
+            background-color: #dcf8c6;
+            align-self: flex-end;
+            margin-left: auto;
+            text-align: right;
+        }
+        .message-bubble.bot {
+            background-color: #fff;
+            align-self: flex-start;
+            margin-right: auto;
+            text-align: left;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+        }
+        .chat-input {
+            display: flex;
+            padding: 15px;
+            background-color: #f9f9f9;
+            border-top: 1px solid #eee;
+        }
+        .chat-input input[type="text"] {
+            flex-grow: 1;
+            padding: 10px 15px;
+            border: 1px solid #ddd;
+            border-radius: 20px;
+            font-size: 1em;
+            outline: none;
+            margin-right: 10px;
+        }
+        .chat-input button {
+            background-color: #333;
+            color: #fff;
+            border: none;
+            border-radius: 20px;
+            padding: 10px 20px;
+            font-size: 1em;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+        .chat-input button:hover {
+            background-color: #555;
+        }
+    </style>
+</head>
+<body>
+    <div class="chat-container">
+        <div class="chat-header">
+            Artorias AI Chat
+        </div>
+        <div class="chat-messages" id="chatMessages">
+            </div>
+        <div class="chat-input">
+            <input type="text" id="messageInput" placeholder="Digite sua mensagem...">
+            <button id="sendButton">Enviar</button>
+        </div>
+    </div>
+
+    <script>
+        // URL da API do seu bot Artorias AI no Render
+        const BOT_API_URL = 'https://artorias-ai-bot.onrender.com/api/messages'; 
+
+        const chatMessages = document.getElementById('chatMessages');
+        const messageInput = document.getElementById('messageInput');
+        const sendButton = document.getElementById('sendButton');
+
+        // Função para adicionar mensagem ao chat
+        function addMessage(text, sender) {
+            const messageDiv = document.createElement('div');
+            messageDiv.classList.add('message-bubble', sender);
+            messageDiv.textContent = text;
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight; // Rolagem automática para o final
+        }
+
+        // Função para enviar mensagem ao bot e receber a resposta
+        async function sendMessageToBot() {
+            const userMessage = messageInput.value.trim();
+            if (userMessage === '') return; // Não envia mensagem vazia
+
+            addMessage(userMessage, 'user'); // Adiciona a mensagem do usuário ao chat
+            messageInput.value = ''; // Limpa o campo de input
+
+            try {
+                const response = await fetch(BOT_API_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ text: userMessage }),
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(`Erro do servidor: ${response.status} - ${errorData.error || response.statusText}`);
+                }
+
+                const data = await response.json();
+                addMessage(data.response, 'bot'); // Adiciona a resposta do bot ao chat
+
+            } catch (error) {
+                console.error('Erro ao comunicar com o bot:', error);
+                addMessage('Desculpe, ocorreu um erro ao se comunicar com o bot. Tente novamente mais tarde.', 'bot');
+            }
+        }
+
+        // Event Listeners para enviar mensagem
+        sendButton.addEventListener('click', sendMessageToBot);
+        messageInput.addEventListener('keypress', (event) => {
+            if (event.key === 'Enter') {
+                sendMessageToBot();
+            }
+        });
+
+        // Mensagem de boas-vindas inicial do chat
+        addMessage('Bem-vindo ao chat Artorias AI! Como posso ajudar?', 'bot');
+    </script>
+</body>
+</html>
