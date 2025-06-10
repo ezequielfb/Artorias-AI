@@ -1,0 +1,8 @@
+Flask
+gunicorn
+aiohttp
+botbuilder-core
+botbuilder-schema
+asyncio
+python-dotenv # Para gerenciar chaves de API e outras variáveis de ambiente
+google-generativeai # Para a API do Gemini
