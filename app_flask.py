@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify
 from botbuilder.core import BotFrameworkAdapter, BotFrameworkAdapterSettings, TurnContext, ConversationState, UserState, MemoryStorage
 from botbuilder.schema import Activity
-from artoriasbot import Artoriasbot # <-- ATUALIZADO: Importa Artoriasbot
+from artoriasbot import Artoriasbot # <-- CORRIGIDO: Importa Artoriasbot
 from config import DefaultConfig
 import asyncio
 import traceback
@@ -15,13 +15,10 @@ app = Flask(__name__)
 
 CONFIG = DefaultConfig()
 
-# As credenciais do bot framework APP_ID e APP_PASSWORD podem vir de variáveis de ambiente também
-# SETTINGS = BotFrameworkAdapterSettings(CONFIG.APP_ID, CONFIG.APP_PASSWORD)
 SETTINGS = BotFrameworkAdapterSettings(
-    os.environ.get("MicrosoftAppId", ""), # Vazio para testes locais no Emulator
-    os.environ.get("MicrosoftAppPassword", "") # Vazio para testes locais no Emulator
+    os.environ.get("MicrosoftAppId", ""),
+    os.environ.get("MicrosoftAppPassword", "")
 )
-
 
 class CustomBotFrameworkAdapter(BotFrameworkAdapter):
     def __init__(self, settings: BotFrameworkAdapterSettings):
@@ -48,13 +45,10 @@ MEMORY = MemoryStorage()
 CONVERSATION_STATE = ConversationState(MEMORY)
 USER_STATE = UserState(MEMORY)
 
-# --- REMOVIDA A INICIALIZAÇÃO DO CLIENTE CLU ---
-# CLU_CLIENT não é mais necessário, pois usaremos Gemini
-
-BOT = Artoriasbot( # <-- ATUALIZADO: Instancia Artoriasbot
+# Removida a inicialização do cliente CLU
+BOT = Artoriasbot( # <-- CORRIGIDO: Instancia Artoriasbot
     CONVERSATION_STATE,
     USER_STATE
-    # Parâmetros CLU removidos
 )
 
 @app.route("/api/messages", methods=["POST"])
@@ -72,25 +66,32 @@ def messages():
     activity = Activity().deserialize(body)
     auth_header = request.headers.get("Authorization", "")
 
-    async def _process_activity_async():
-        try:
-            await ADAPTER.process_activity(activity, auth_header, BOT.on_turn)
-        except Exception as e:
-            print(f"Erro ao processar atividade assíncrona: {e}")
-            traceback.print_exc()
-
+    # --- MODIFICAÇÃO PRINCIPAL AQUI: Como lidar com asyncio em Flask ---
     try:
-        asyncio.run(_process_activity_async())
+        # Pega o loop de eventos corrente. Se não houver um, cria um novo para a Thread atual.
+        # Isso é mais robusto para uso em ambientes como o Gunicorn ou o servidor de desenvolvimento do Flask.
+        loop = asyncio.get_event_loop()
+        
+        # Cria uma "tarefa" assíncrona para processar a atividade do bot.
+        # NÃO usamos asyncio.run() aqui diretamente, pois o Flask já está rodando em um loop/thread.
+        loop.run_until_complete(ADAPTER.process_activity(activity, auth_header, BOT.on_turn))
+
     except RuntimeError as e:
-        print(f"RuntimeError ao executar asyncio.run(): {e}. Tentando outra abordagem...")
+        # Se um loop já estiver rodando e não pudermos usar run_until_complete,
+        # tentamos agendar a tarefa no loop existente.
+        print(f"RuntimeError ou Loop já rodando: {e}. Tentando agendar a tarefa no loop existente...")
         traceback.print_exc()
         try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(_process_activity_async())
-            print("Tarefa agendada com sucesso.")
+            current_loop = asyncio.get_running_loop() # Tenta pegar o loop que está rodando
+            current_loop.create_task(ADAPTER.process_activity(activity, auth_header, BOT.on_turn))
+            print("Tarefa assíncrona agendada com sucesso no loop existente.")
         except RuntimeError:
-            print("Não foi possível agendar a tarefa assíncrona: nenhum loop de eventos rodando.")
-            return jsonify({"error": "Erro interno no servidor ao agendar processamento do bot."}), 500
+            print("ERRO CRÍTICO: Não foi possível obter ou agendar a tarefa assíncrona. Nenhum loop de eventos rodando ou erro no agendamento.")
+            return jsonify({"error": "Erro interno no servidor: Falha ao agendar processamento do bot."}), 500
+    except Exception as e:
+        print(f"Erro inesperado durante o processamento da atividade: {e}")
+        traceback.print_exc()
+        return jsonify({"error": "Erro interno no servidor durante processamento do bot."}), 500
 
     return jsonify({"status": "Solicitação recebida, processamento iniciado."}), 201
 
