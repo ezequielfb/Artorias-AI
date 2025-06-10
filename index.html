@@ -5,91 +5,124 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Artorias AI - Webchat</title>
     <style>
+        /* Modo Escuro - Cores de Fundo */
         body {
             font-family: Arial, sans-serif;
             display: flex;
             justify-content: center;
             align-items: center;
             min-height: 100vh;
-            background-color: #f0f2f5;
+            background-color: #1a1a1a; /* Fundo mais escuro para o body */
             margin: 0;
             padding: 20px;
             box-sizing: border-box;
+            color: #e0e0e0; /* Cor do texto padrão mais clara */
         }
         .chat-container {
             width: 100%;
             max-width: 500px;
-            background-color: #fff;
-            border-radius: 8px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            background-color: #2b2b2b; /* Fundo do chat container escuro */
+            border-radius: 12px; /* Bordas mais arredondadas */
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4); /* Sombra mais pronunciada */
             display: flex;
             flex-direction: column;
             overflow: hidden;
-            height: 70vh; /* Altura fixa para a janela de chat */
-            min-height: 400px;
+            height: 80vh; /* Altura um pouco maior para o chat */
+            min-height: 500px;
         }
         .chat-header {
-            background-color: #333;
-            color: #fff;
-            padding: 15px;
+            background-color: #0d0d0d; /* Cabeçalho bem escuro */
+            color: #f0f0f0; /* Texto do cabeçalho claro */
+            padding: 18px;
             text-align: center;
-            font-size: 1.2em;
+            font-size: 1.3em;
             font-weight: bold;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid #333; /* Linha sutil no cabeçalho */
         }
         .chat-messages {
             flex-grow: 1;
             padding: 20px;
             overflow-y: auto;
-            border-bottom: 1px solid #eee;
-            background-color: #e9ebee;
+            background-color: #222222; /* Fundo das mensagens mais escuro */
+            display: flex; /* Para flexbox das bolhas de mensagem */
+            flex-direction: column;
+            gap: 8px; /* Espaço entre as bolhas */
         }
+        /* Estilo da barra de rolagem (WebKit - Chrome/Safari) */
+        .chat-messages::-webkit-scrollbar {
+            width: 8px;
+        }
+        .chat-messages::-webkit-scrollbar-track {
+            background: #2b2b2b;
+        }
+        .chat-messages::-webkit-scrollbar-thumb {
+            background-color: #555;
+            border-radius: 10px;
+            border: 2px solid #222222;
+        }
+
         .message-bubble {
-            max-width: 80%;
-            padding: 10px 15px;
-            border-radius: 20px;
-            margin-bottom: 10px;
-            line-height: 1.4;
+            max-width: 75%; /* Um pouco menor para melhor leitura */
+            padding: 12px 18px;
+            border-radius: 22px; /* Mais arredondado */
+            line-height: 1.5;
+            word-wrap: break-word; /* Garante quebras de linha em palavras longas */
         }
         .message-bubble.user {
-            background-color: #dcf8c6;
+            background-color: #007bff; /* Azul para o usuário */
+            color: #fff;
             align-self: flex-end;
             margin-left: auto;
-            text-align: right;
+            text-align: left; /* Alinhamento esquerdo dentro da bolha */
         }
         .message-bubble.bot {
-            background-color: #fff;
+            background-color: #444; /* Cinza escuro para o bot */
+            color: #e0e0e0;
             align-self: flex-start;
             margin-right: auto;
             text-align: left;
-            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
         }
         .chat-input {
             display: flex;
             padding: 15px;
-            background-color: #f9f9f9;
-            border-top: 1px solid #eee;
+            background-color: #1a1a1a; /* Fundo do input mais escuro */
+            border-top: 1px solid #333; /* Linha sutil no topo do input */
+            align-items: center;
         }
         .chat-input input[type="text"] {
             flex-grow: 1;
-            padding: 10px 15px;
-            border: 1px solid #ddd;
-            border-radius: 20px;
+            padding: 12px 18px;
+            border: 1px solid #555; /* Borda mais suave */
+            border-radius: 25px; /* Bem arredondado */
             font-size: 1em;
             outline: none;
             margin-right: 10px;
+            background-color: #333; /* Fundo do input de texto */
+            color: #f0f0f0; /* Cor do texto no input */
+            box-shadow: inset 0 1px 3px rgba(0,0,0,0.3);
+        }
+        .chat-input input[type="text"]::placeholder {
+            color: #bbb; /* Cor do placeholder */
         }
         .chat-input button {
-            background-color: #333;
+            background-color: #007bff; /* Azul para o botão de enviar */
             color: #fff;
             border: none;
-            border-radius: 20px;
-            padding: 10px 20px;
+            border-radius: 25px; /* Bem arredondado */
+            padding: 12px 25px;
             font-size: 1em;
             cursor: pointer;
-            transition: background-color 0.3s ease;
+            transition: background-color 0.3s ease, transform 0.1s ease;
+            white-space: nowrap; /* Evita quebra de linha no botão */
         }
         .chat-input button:hover {
-            background-color: #555;
+            background-color: #0056b3;
+            transform: translateY(-1px);
+        }
+        .chat-input button:active {
+            transform: translateY(0);
         }
     </style>
 </head>
