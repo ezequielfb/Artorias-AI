@@ -28,8 +28,7 @@ class Artoriasbot: # Não herda mais de ActivityHandler
         self.gemini_model = genai.GenerativeModel('gemini-2.0-flash')
         print("Artoriasbot: Modelo Gemini inicializado com sucesso.")
 
-
-async def process_message(self, user_message: str, user_id: str = "default_user") -> str:
+    async def process_message(self, user_message: str, user_id: str = "default_user") -> str:
         """
         Processa uma mensagem de texto do usuário e retorna uma resposta.
         Esta é a nova função principal do seu bot.
