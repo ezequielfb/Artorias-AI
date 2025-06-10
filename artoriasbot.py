@@ -1,46 +1,30 @@
-# Copyright (c) Microsoft Corporation. All rights reserved.
-# Licensed under the MIT License.
-
 import sys
 import traceback
-# As importações abaixo foram removidas pois não são usadas na nova arquitetura:
-# from datetime import datetime
-# from typing import Any, Dict
-# from botbuilder.core import ActivityHandler, TurnContext, MessageFactory, UserState, ConversationState
-# from botbuilder.schema import ChannelAccount, ActivityTypes
-# from config import DefaultConfig
-
-# Importações essenciais para o Gemini
 import google.generativeai as genai
-import os # Para acessar variáveis de ambiente
+import os
+import json # <-- Adicionado para lidar com JSON
 
-class Artoriasbot: # Não herda mais de ActivityHandler
+class Artoriasbot:
     def __init__(self):
-        self.conversation_states = {} # Dicionário para simular estado por ID de usuário/conversa
+        self.conversation_states = {} 
 
-        # Configuração da API do Gemini
         gemini_api_key = os.environ.get("GEMINI_API_KEY")
         if not gemini_api_key:
             raise ValueError("GEMINI_API_KEY não configurada nas variáveis de ambiente.")
         genai.configure(api_key=gemini_api_key)
         
-        # Usando o modelo 'gemini-2.0-flash' conforme o log do curl
         self.gemini_model = genai.GenerativeModel('gemini-2.0-flash')
         print("Artoriasbot: Modelo Gemini inicializado com sucesso.")
 
     async def process_message(self, user_message: str, user_id: str = "default_user") -> str:
-        """
-        Processa uma mensagem de texto do usuário e retorna uma resposta.
-        Esta é a nova função principal do seu bot.
-        """
         print(f"Artoriasbot: Processando mensagem de '{user_id}': '{user_message}'")
 
         current_flow_state = self.conversation_states.get(user_id, {"state": "initial", "history": []})
         
         response_text = "Desculpe, não consegui processar sua requisição no momento. Tente novamente."
-        
+        extracted_data = {} # Dicionário para armazenar dados extraídos
+
         try:
-            # Contexto do sistema para o Gemini: Define o papel do bot e suas responsabilidades.
             # INSTRUÇÕES ATUALIZADAS PARA SAÍDA ESTRUTURADA E FLUXOS
             system_instruction = (
                 f"Você é Artorias AI, um assistente inteligente para a Tralhotec, uma empresa de soluções de TI.\n"
@@ -51,11 +35,19 @@ class Artoriasbot: # Não herda mais de ActivityHandler
                 f"    b. Nome da empresa.\n"
                 f"    c. Principais desafios/necessidades.\n"
                 f"    d. Tamanho da empresa (Ex: até 10, 11-50, 50+).\n"
-                f"    Após coletar todas as informações, informe que um SDR entrará em contato.\n"
+                f"    Após coletar todas as informações, **e SOMENTE APÓS TODAS AS INFORMAÇÕES serem coletadas**, inclua um bloco JSON no final da sua resposta de texto, formatado assim:\n"
+                f"    ```json\n"
+                f"    {{\"action\": \"sdr_completed\", \"lead_info\": {{\"nome\": \"[Nome]\", \"funcao\": \"[Funcao]\", \"empresa\": \"[Empresa]\", \"desafios\": \"[Desafios]\", \"tamanho\": \"[Tamanho]\"}}}}\n"
+                f"    ```\n"
+                f"    Substitua os placeholders `[Nome]`, `[Funcao]`, etc., pelos dados coletados.\n"
                 f"3.  **Suporte Técnico:** Se o usuário tiver um problema técnico ou precisar de ajuda, inicie o processo de suporte. Colete:\n"
                 f"    a. Descrição detalhada do problema.\n"
                 f"    b. Informações de contato (nome, e-mail, empresa) se for necessária escalada (peça após a descrição do problema).\n"
-                f"    Após coletar o problema e as informações de contato, informe que o ticket será encaminhado para a equipe de suporte.\n"
+                f"    Após coletar o problema e as informações de contato, **e SOMENTE APÓS AMBAS AS INFORMAÇÕES serem coletadas**, inclua um bloco JSON no final da sua resposta de texto, formatado assim:\n"
+                f"    ```json\n"
+                f"    {{\"action\": \"support_escalated\", \"ticket_info\": {{\"problema\": \"[Problema]\", \"nome_contato\": \"[Nome Contato]\", \"email_contato\": \"[Email Contato]\", \"empresa_contato\": \"[Empresa Contato]\"}}}}\n"
+                f"    ```\n"
+                f"    Substitua os placeholders `[Problema]`, `[Nome Contato]`, etc., pelos dados coletados.\n"
                 f"4.  **Comportamento:**\n"
                 f"    - Mantenha um tom profissional e útil.\n"
                 f"    - Seja conciso. Limite suas respostas a 3 frases, a menos que uma explicação mais completa seja solicitada ou necessária para o fluxo.\n"
@@ -65,8 +57,6 @@ class Artoriasbot: # Não herda mais de ActivityHandler
                 f"---"
             )
 
-            # O histórico de chat deve ser passado para o Gemini para manter o contexto.
-            # O sistema instruction pode ser a primeira entrada do histórico para o Gemini.
             if not current_flow_state["history"]:
                 gemini_history = [
                     {"role": "user", "parts": [{"text": system_instruction}]},
@@ -75,22 +65,29 @@ class Artoriasbot: # Não herda mais de ActivityHandler
             else:
                 gemini_history = current_flow_state["history"]
             
-            # Inicia a sessão de chat com o histórico construído
             chat_session = self.gemini_model.start_chat(history=gemini_history)
-            
-            # Envia a nova mensagem do usuário para a sessão de chat.
             gemini_response = chat_session.send_message(user_message)
 
             if gemini_response and gemini_response.candidates:
                 response_content = gemini_response.candidates[0].content.parts[0].text
-                response_text = response_content # Por enquanto, a resposta é apenas o texto
+                response_text = response_content 
                 
-                # Vamos tentar fazer o Gemini retornar um JSON no início da resposta.
-                # Esta é uma técnica de prompt, e o Gemini não GARANTE que seguirá,
-                # mas é um passo para entender como extrair dados estruturados.
-                # Exemplo: { "action": "sdr_qualify", "next_step": "ask_name", "response": "Claro! Para começarmos, qual seu nome e função?" }
-                # Mas para a primeira iteração, vamos apenas focar na resposta em texto.
-                # A lógica de parsing JSON será um próximo passo.
+                # --- NOVA LÓGICA DE EXTRAÇÃO DE JSON ---
+                # Procura por um bloco de código JSON na resposta do Gemini
+                json_start = response_content.find("```json")
+                json_end = response_content.find("```", json_start + 1)
+
+                if json_start != -1 and json_end != -1:
+                    json_str = response_content[json_start + 7:json_end].strip()
+                    try:
+                        extracted_data = json.loads(json_str)
+                        print(f"Artoriasbot: JSON extraído: {extracted_data}")
+                        # Opcional: Remover o bloco JSON da resposta textual para o usuário
+                        response_text = response_content[:json_start].strip() 
+                    except json.JSONDecodeError as e:
+                        print(f"Artoriasbot: ERRO ao parsear JSON: {e}")
+                        extracted_data = {} # Resetar se houver erro no JSON
+                # --- FIM DA NOVA LÓGICA DE EXTRAÇÃO DE JSON ---
 
                 # Atualiza nosso histórico local com o histórico da sessão do Gemini.
                 current_flow_state["history"] = [
@@ -102,6 +99,11 @@ class Artoriasbot: # Não herda mais de ActivityHandler
 
             # Atualiza o estado da conversa local (em memória)
             self.conversation_states[user_id] = current_flow_state
+
+            # Retornar apenas a resposta textual para o usuário.
+            # O 'extracted_data' pode ser usado aqui para acionar outras ações (n8n, etc.)
+            # Mas, por enquanto, ele apenas será logado.
+            return response_text
 
         except Exception as e:
             print(f"ERRO: Falha ao chamar a API do Gemini: {e}")
