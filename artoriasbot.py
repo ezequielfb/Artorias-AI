@@ -26,6 +26,8 @@ class Artoriasbot:
 
         try:
             # INSTRUÇÕES ATUALIZADAS PARA SAÍDA ESTRUTURADA E FLUXOS
+            # AQUI: Pedimos explicitamente para o Gemini primeiro dar a resposta em linguagem natural,
+            # E SÓ DEPOIS incluir o JSON.
             system_instruction = (
                 f"Você é Artorias AI, um assistente inteligente para a Tralhotec, uma empresa de soluções de TI.\n"
                 f"Suas responsabilidades são:\n"
@@ -35,9 +37,10 @@ class Artoriasbot:
                 f"    b. Nome da empresa.\n"
                 f"    c. Principais desafios/necessidades.\n"
                 f"    d. Tamanho da empresa (Ex: até 10, 11-50, 50+).\n"
-                f"    Ao final do fluxo SDR (todas as informações coletadas), forneça a resposta de texto final para o usuário e, em uma nova linha, **então adicione o bloco JSON**.\n"
+                f"    e. **E-mail de contato e/ou número de WhatsApp** (último passo da qualificação SDR).\n" # <-- ATUALIZADO: Meios de contato flexíveis
+                f"    Ao final do fluxo SDR (todas as informações serem coletadas), forneça a resposta de texto final para o usuário e, em uma nova linha, **então adicione o bloco JSON**.\n"
                 f"    ```json\n"
-                f"    {{\"action\": \"sdr_completed\", \"lead_info\": {{\"nome\": \"[Nome]\", \"funcao\": \"[Funcao]\", \"empresa\": \"[Empresa]\", \"desafios\": \"[Desafios]\", \"tamanho\": \"[Tamanho]\"}}}}\n"
+                f"    {{\"action\": \"sdr_completed\", \"lead_info\": {{\"nome\": \"[Nome]\", \"funcao\": \"[Funcao]\", \"empresa\": \"[Empresa]\", \"desafios\": \"[Desafios]\", \"tamanho\": \"[Tamanho]\", \"email\": \"[Email]\", \"whatsapp\": \"[WhatsApp]\"}}}}\n" # <-- ATUALIZADO: Adicionado "whatsapp" ao JSON
                 f"    ```\n"
                 f"    Substitua os placeholders `[Nome]`, `[Funcao]`, etc., pelos dados coletados.\n"
                 f"3.  **Suporte Técnico:** Se o usuário tiver um problema técnico ou precisar de ajuda, inicie o processo de suporte. Colete:\n"
@@ -71,11 +74,10 @@ class Artoriasbot:
             if gemini_response and gemini_response.candidates:
                 response_content = gemini_response.candidates[0].content.parts[0].text
                 
-                print(f"DEBUG: Conteúdo bruto do Gemini: '{response_content}'") # DEBUG
+                print(f"DEBUG: Conteúdo bruto do Gemini: '{response_content}'") 
                 
-                response_text = response_content # <-- Inicializa response_text com todo o conteúdo
+                response_text = response_content 
                 
-                # --- Lógica de EXTRAÇÃO DE JSON ---
                 json_start_tag = "```json"
                 json_end_tag = "```"
                 json_start_index = response_content.find(json_start_tag)
@@ -84,41 +86,38 @@ class Artoriasbot:
                 if json_start_index != -1:
                     json_end_index = response_content.find(json_end_tag, json_start_index + len(json_start_tag))
                 
-                print(f"DEBUG: json_start_index: {json_start_index}, json_end_index: {json_end_index}") # DEBUG
+                print(f"DEBUG: json_start_index: {json_start_index}, json_end_index: {json_end_index}")
 
                 if json_start_index != -1 and json_end_index != -1:
                     json_str = response_content[json_start_index + len(json_start_tag):json_end_index].strip()
-                    print(f"DEBUG: String JSON extraída: '{json_str}'") # DEBUG
+                    print(f"DEBUG: String JSON extraída: '{json_str}'")
                     try:
                         extracted_data = json.loads(json_str)
                         print(f"Artoriasbot: JSON extraído: {extracted_data}")
                         
-                        # Remove o bloco JSON da resposta textual para o usuário
                         response_text = response_content[:json_start_index].strip()
                         
-                        print(f"DEBUG: Resposta textual após remover JSON: '{response_text}'") # DEBUG
+                        print(f"DEBUG: Resposta textual após remover JSON: '{response_text}'")
 
-                        # Se a parte textual antes do JSON estiver vazia, forneça uma resposta padrão ou final
                         if not response_text:
-                            print(f"DEBUG: response_text está vazio. Tentando resposta padrão.") # DEBUG
+                            print(f"DEBUG: response_text está vazio. Tentando resposta padrão.")
                             action = extracted_data.get("action", "")
-                            print(f"DEBUG: Ação extraída do JSON: '{action}'") # DEBUG
+                            print(f"DEBUG: Ação extraída do JSON: '{action}'")
 
                             if "sdr_completed" in action:
                                 response_text = "Perfeito! Agradeço as informações. Um dos nossos SDRs entrará em contato em breve para agendar uma conversa com um consultor de vendas."
                             elif "support_escalated" in action:
                                 response_text = "Obrigado! Sua solicitação de suporte foi encaminhada para nossa equipe. Eles entrarão em contato em breve."
                             else:
-                                response_text = "Concluído! Agradeço as informações." # Fallback genérico se a ação não for reconhecida ou faltar
+                                response_text = "Concluído! Agradeço as informações." 
 
-                        print(f"DEBUG: Resposta textual final: '{response_text}'") # DEBUG
+                        print(f"DEBUG: Resposta textual final: '{response_text}'")
 
                     except json.JSONDecodeError as e:
                         print(f"Artoriasbot: ERRO ao parsear JSON: {e}")
-                        extracted_data = {} # Resetar se houver erro no JSON
+                        extracted_data = {} 
                 # --- FIM DA LÓGICA DE EXTRAÇÃO DE JSON ---
 
-                # Atualiza nosso histórico local com o histórico da sessão do Gemini.
                 current_flow_state["history"] = [
                     {"role": entry.role, "parts": [part.text for part in entry.parts if hasattr(part, 'text')]}
                     for entry in chat_session.history
@@ -126,7 +125,6 @@ class Artoriasbot:
             else:
                 response_text = "Não consegui gerar uma resposta inteligente no momento. Por favor, tente novamente."
 
-            # Atualiza o estado da conversa local (em memória)
             self.conversation_states[user_id] = current_flow_state
 
             return response_text
