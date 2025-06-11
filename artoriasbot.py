@@ -13,7 +13,7 @@ class Artoriasbot:
             raise ValueError("GEMINI_API_KEY não configurada nas variáveis de ambiente.")
         genai.configure(api_key=gemini_api_key)
         
-        self.gemini_model = genai.Generativeai.GenerativeModel('gemini-2.0-flash') # Certifique-se que é 'gemini-2.0-flash'
+        self.gemini_model = genai.GenerativeModel('gemini-2.0-flash') 
         print("Artoriasbot: Modelo Gemini inicializado com sucesso.")
 
     async def process_message(self, user_message: str, user_id: str = "default_user") -> str:
@@ -26,8 +26,6 @@ class Artoriasbot:
 
         try:
             # INSTRUÇÕES ATUALIZADAS PARA SAÍDA ESTRUTURADA E FLUXOS
-            # AQUI: Pedimos explicitamente para o Gemini primeiro dar a resposta em linguagem natural,
-            # E SÓ DEPOIS incluir o JSON.
             system_instruction = (
                 f"Você é Artorias AI, um assistente inteligente para a Tralhotec, uma empresa de soluções de TI.\n"
                 f"Suas responsabilidades são:\n"
@@ -72,6 +70,9 @@ class Artoriasbot:
 
             if gemini_response and gemini_response.candidates:
                 response_content = gemini_response.candidates[0].content.parts[0].text
+                
+                print(f"DEBUG: Conteúdo bruto do Gemini: '{response_content}'") # DEBUG
+                
                 response_text = response_content # <-- Inicializa response_text com todo o conteúdo
                 
                 # --- Lógica de EXTRAÇÃO DE JSON ---
@@ -81,35 +82,40 @@ class Artoriasbot:
                 json_end_index = -1
 
                 if json_start_index != -1:
-                    # Tenta encontrar o final do bloco JSON a partir do início do bloco
                     json_end_index = response_content.find(json_end_tag, json_start_index + len(json_start_tag))
                 
+                print(f"DEBUG: json_start_index: {json_start_index}, json_end_index: {json_end_index}") # DEBUG
+
                 if json_start_index != -1 and json_end_index != -1:
                     json_str = response_content[json_start_index + len(json_start_tag):json_end_index].strip()
+                    print(f"DEBUG: String JSON extraída: '{json_str}'") # DEBUG
                     try:
                         extracted_data = json.loads(json_str)
                         print(f"Artoriasbot: JSON extraído: {extracted_data}")
                         
                         # Remove o bloco JSON da resposta textual para o usuário
-                        # Pega a parte antes do JSON e a parte depois do JSON (se houver)
                         response_text = response_content[:json_start_index].strip()
-                        # Se houver texto após o JSON, você pode decidir incluí-lo ou não.
-                        # Por enquanto, vamos ignorar texto após o JSON para manter o foco na mensagem antes.
                         
+                        print(f"DEBUG: Resposta textual após remover JSON: '{response_text}'") # DEBUG
+
                         # Se a parte textual antes do JSON estiver vazia, forneça uma resposta padrão ou final
                         if not response_text:
-                            if "sdr_completed" in extracted_data.get("action", ""):
+                            print(f"DEBUG: response_text está vazio. Tentando resposta padrão.") # DEBUG
+                            action = extracted_data.get("action", "")
+                            print(f"DEBUG: Ação extraída do JSON: '{action}'") # DEBUG
+
+                            if "sdr_completed" in action:
                                 response_text = "Perfeito! Agradeço as informações. Um dos nossos SDRs entrará em contato em breve para agendar uma conversa com um consultor de vendas."
-                            elif "support_escalated" in extracted_data.get("action", ""):
+                            elif "support_escalated" in action:
                                 response_text = "Obrigado! Sua solicitação de suporte foi encaminhada para nossa equipe. Eles entrarão em contato em breve."
                             else:
-                                response_text = "Concluído! Agradeço as informações."
+                                response_text = "Concluído! Agradeço as informações." # Fallback genérico se a ação não for reconhecida ou faltar
 
+                        print(f"DEBUG: Resposta textual final: '{response_text}'") # DEBUG
 
                     except json.JSONDecodeError as e:
                         print(f"Artoriasbot: ERRO ao parsear JSON: {e}")
                         extracted_data = {} # Resetar se houver erro no JSON
-                        # Se o parsing falhar, a response_text manterá o conteúdo original (com o JSON ilegível).
                 # --- FIM DA LÓGICA DE EXTRAÇÃO DE JSON ---
 
                 # Atualiza nosso histórico local com o histórico da sessão do Gemini.
