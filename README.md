@@ -13,8 +13,6 @@ Este projeto representa uma evolução de um bot anterior, com foco em uma arqui
 
 Atualmente em fase de desenvolvimento e teste local, com integração funcional da API do Google Gemini.
 
-## Tecnologias Utilizadas
-
 ## Como Rodar Localmente
 
 ### Pré-requisitos
@@ -36,6 +34,7 @@ Certifique-se de ter instalado:
        substitua SEU_USUARIO pelo seu nome de usuário:
         git clone https://github.com/SEU_USUARIO/Artorias-AI.git
         cd Artorias-AI
+    ```
 
 2.  **Crie e ative um ambiente virtual:**
     ```bash
