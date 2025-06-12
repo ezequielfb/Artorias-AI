@@ -3,6 +3,7 @@ import traceback
 import google.generativeai as genai
 import os
 import json
+import requests 
 
 class Artoriasbot:
     def __init__(self):
@@ -26,8 +27,6 @@ class Artoriasbot:
 
         try:
             # INSTRUÇÕES ATUALIZADAS PARA SAÍDA ESTRUTURADA E FLUXOS
-            # AQUI: Pedimos explicitamente para o Gemini primeiro dar a resposta em linguagem natural,
-            # E SÓ DEPOIS incluir o JSON.
             system_instruction = (
                 f"Você é Artorias AI, um assistente inteligente para a Tralhotec, uma empresa de soluções de TI.\n"
                 f"Suas responsabilidades são:\n"
@@ -37,10 +36,10 @@ class Artoriasbot:
                 f"    b. Nome da empresa.\n"
                 f"    c. Principais desafios/necessidades.\n"
                 f"    d. Tamanho da empresa (Ex: até 10, 11-50, 50+).\n"
-                f"    e. **E-mail de contato e/ou número de WhatsApp** (último passo da qualificação SDR).\n" # <-- ATUALIZADO: Meios de contato flexíveis
+                f"    e. **E-mail de contato e/ou número de WhatsApp** (último passo da qualificação SDR).\n"
                 f"    Ao final do fluxo SDR (todas as informações serem coletadas), forneça a resposta de texto final para o usuário e, em uma nova linha, **então adicione o bloco JSON**.\n"
                 f"    ```json\n"
-                f"    {{\"action\": \"sdr_completed\", \"lead_info\": {{\"nome\": \"[Nome]\", \"funcao\": \"[Funcao]\", \"empresa\": \"[Empresa]\", \"desafios\": \"[Desafios]\", \"tamanho\": \"[Tamanho]\", \"email\": \"[Email]\", \"whatsapp\": \"[WhatsApp]\"}}}}\n" # <-- ATUALIZADO: Adicionado "whatsapp" ao JSON
+                f"    {{\"action\": \"sdr_completed\", \"lead_info\": {{\"nome\": \"[Nome]\", \"funcao\": \"[Funcao]\", \"empresa\": \"[Empresa]\", \"desafios\": \"[Desafios]\", \"tamanho\": \"[Tamanho]\", \"email\": \"[Email]\", \"whatsapp\": \"[WhatsApp]\"}}}}\n"
                 f"    ```\n"
                 f"    Substitua os placeholders `[Nome]`, `[Funcao]`, etc., pelos dados coletados.\n"
                 f"3.  **Suporte Técnico:** Se o usuário tiver um problema técnico ou precisar de ajuda, inicie o processo de suporte. Colete:\n"
@@ -94,6 +93,16 @@ class Artoriasbot:
                     try:
                         extracted_data = json.loads(json_str)
                         print(f"Artoriasbot: JSON extraído: {extracted_data}")
+                        
+                        # --- CÓDIGO NOVO: ENVIAR JSON PARA O N8N ---
+                        # ATENÇÃO: SUBSTITUA PELA SUA URL DE TESTE DO N8N OBTIDA DO N8N WEBHOOK
+                        N8N_WEBHOOK_URL = "http://host.docker.internal:5678/webhook-test/processar_lead" 
+                        try:
+                            requests.post(N8N_WEBHOOK_URL, json=extracted_data)
+                            print(f"Artoriasbot: JSON enviado para o n8n com sucesso.")
+                        except requests.exceptions.RequestException as req_err:
+                            print(f"Artoriasbot: ERRO ao enviar JSON para o n8n: {req_err}")
+                        # --- FIM DO CÓDIGO NOVO ---
                         
                         response_text = response_content[:json_start_index].strip()
                         
