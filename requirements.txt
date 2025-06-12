@@ -1,7 +1,6 @@
 Flask
 gunicorn
 python-dotenv
-google-generativeai # Versão fixada
-# asyncpg # <-- REMOVIDO
+google-generativeai
 Flask-Cors
-requests # <-- RE-ADICIONADO
+requests
