@@ -41,6 +41,7 @@ class Artoriasbot:
             # Query para buscar histórico de conversas.
             # Ordenado por timestamp para garantir a ordem correta.
             # Assumimos que a tabela 'conversation_history' existe e tem colunas 'user_id', 'role', 'content', 'timestamp'.
+            # A coluna 'content' armazenará o texto.
             history_records = await conn.fetch(
                 """
                 SELECT role, content
@@ -103,17 +104,24 @@ class Artoriasbot:
         extracted_data = {} 
 
         try:
+            # INSTRUÇÕES ATUALIZADAS PARA SAÍDA ESTRUTURADA E FLUXOS
+            # AQUI: Pedimos explicitamente para o Gemini primeiro dar a resposta em linguagem natural,
+            # E SÓ DEPOIS incluir o JSON.
             system_instruction = (
                 f"Você é Artorias AI, um assistente inteligente para a Tralhotec, uma empresa de soluções de TI.\n"
+                f"Sua missão é estritamente guiar o usuário pelos fluxos de SDR ou Suporte para coletar as informações necessárias e gerar o JSON estruturado.\n"
+                f"**NÃO FORNEÇA SOLUÇÕES DETALHADAS, INFORMAÇÕES EXTENSAS OU RESPOSTAS DE FAQ LONGA DURANTE OS FLUXOS DE COLETA DE DADOS.**\n"
+                f"Mantenha-se focado(a) em pedir a próxima informação na sequência. Responda de forma concisa e direta ao ponto.\n"
+                f"\n"
                 f"Suas responsabilidades são:\n"
-                f"1.  **Atendimento Geral (FAQ):** Responda perguntas sobre preços, implementação, Microsoft Teams, gestão de documentação e contratos. Se for uma pergunta de FAQ, forneça a resposta diretamente.\n"
+                f"1.  **Atendimento Geral (FAQ):** Responda perguntas sobre preços, implementação, Microsoft Teams, gestão de documentação e contratos. Se for uma pergunta de FAQ genuína (não parte de um fluxo de SDR/Suporte), forneça a resposta diretamente, mas mantenha-a concisa (máximo 3 frases).\n"
                 f"2.  **Qualificação SDR:** Se o usuário demonstrar interesse em vendas, orçamentos, propostas, ou falar com um especialista/consultor de vendas, inicie o processo de qualificação de SDR. Colete as seguintes informações sequencialmente:\n"
                 f"    a. Nome completo e função/cargo.\n"
                 f"    b. Nome da empresa.\n"
                 f"    c. Principais desafios/necessidades.\n"
                 f"    d. Tamanho da empresa (Ex: até 10, 11-50, 50+).\n"
                 f"    e. E-mail de contato e/ou número de WhatsApp (último passo da qualificação SDR).\n"
-                f"    Ao final do fluxo SDR (todas as informações serem coletadas), forneça a resposta de texto final para o usuário e, em uma nova linha, **então adicione o bloco JSON**.\n"
+                f"    Ao final do fluxo SDR (após **todas** as informações serem coletadas), forneça uma breve resposta de texto final para o usuário (agradecendo e informando o contato do SDR) e, em uma nova linha, **então adicione o bloco JSON**.\n"
                 f"    ```json\n"
                 f"    {{\"action\": \"sdr_completed\", \"lead_info\": {{\"nome\": \"[Nome]\", \"funcao\": \"[Funcao]\", \"empresa\": \"[Empresa]\", \"desafios\": \"[Desafios]\", \"tamanho\": \"[Tamanho]\", \"email\": \"[Email]\", \"whatsapp\": \"[WhatsApp]\"}}}}\n"
                 f"    ```\n"
@@ -121,27 +129,23 @@ class Artoriasbot:
                 f"3.  **Suporte Técnico:** Se o usuário tiver um problema técnico ou precisar de ajuda, inicie o processo de suporte. Colete:\n"
                 f"    a. Descrição detalhada do problema.\n"
                 f"    b. Informações de contato (nome, e-mail, empresa) se for necessária escalada (peça após a descrição do problema).\n"
-                f"    Ao final do fluxo de Suporte (problema e contato coletados), forneça a resposta de texto final para o usuário e, em uma nova linha, **então adicione o bloco JSON**.\n"
+                f"    Ao final do fluxo de Suporte (problema e contato coletados), forneça uma breve resposta de texto final para o usuário (agradecendo e informando o encaminhamento) e, em uma nova linha, **então adicione o bloco JSON**.\n"
                 f"    ```json\n"
                 f"    {{\"action\": \"support_escalated\", \"ticket_info\": {{\"problema\": \"[Problema]\", \"nome_contato\": \"[Nome Contato]\", \"email_contato\": \"[Email Contato]\", \"empresa_contato\": \"[Empresa Contato]\"}}}}\n"
                 f"    ```\n"
                 f"    Substitua os placeholders `[Problema]`, `[Nome Contato]`, etc., pelos dados coletados.\n"
-                f"4.  **Comportamento:**\n"
+                f"4.  **Comportamento Geral:**\n"
                 f"    - Mantenha um tom profissional e útil.\n"
-                f"    - Seja conciso. Limite suas respostas a 3 frases, a menos que uma explicação mais completa seja solicitada ou necessária para o fluxo.\n"
-                f"    - Guie o usuário suavemente pelos fluxos de SDR ou Suporte, pedindo uma informação por vez.\n"
+                f"    - **Peça apenas UMA informação por vez** e aguarde a resposta antes de pedir a próxima.\n"
+                f"    - Se o usuário fornecer múltiplas informações de uma vez, reconheça o que foi dado e peça a **próxima informação pendente** na sequência do fluxo.\n"
                 f"    - Se não entender, peça para o usuário reformular.\n"
                 f"    - Se o usuário se despedir ou agradecer, responda de forma cordial e encerre o tópico.\n"
                 f"---"
             )
 
-            # --- NOVA LÓGICA: ADICIONA A INSTRUÇÃO AO HISTÓRICO APENAS NO PRIMEIRO TURNO ---
-            # O sistema instruction deve ser a primeira entrada do histórico para o Gemini.
-            # Se for a primeira vez que conversamos (histórico do BD vazio), adicione a instrução.
-            if not gemini_history: # Verifica se o histórico carregado do BD está vazio
+            if not current_flow_state["history"]: # Verifica se o histórico carregado do BD está vazio
                 gemini_history.append({"role": "user", "parts": [{"text": system_instruction}]})
                 gemini_history.append({"role": "model", "parts": [{"text": "Entendido. Estou pronto para ajudar a Tralhotec. Como posso iniciar?"}]})
-            # --- FIM DA NOVA LÓGICA ---
             
             chat_session = self.gemini_model.start_chat(history=gemini_history)
             gemini_response = chat_session.send_message(user_message)
@@ -183,7 +187,7 @@ class Artoriasbot:
                         if not response_text:
                             print(f"DEBUG: response_text está vazio. Tentando resposta padrão.")
                             action = extracted_data.get("action", "")
-                            print(f"DEBUG: Ação extraída do JSON: '{action}'")
+                            print(f"DEBUG: Ação extraída do JSON: '{action}')")
 
                             if "sdr_completed" in action:
                                 response_text = "Perfeito! Agradeço as informações. Um dos nossos SDRs entrará em contato em breve para agendar uma conversa com um consultor de vendas."
