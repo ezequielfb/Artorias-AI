@@ -15,8 +15,7 @@ class Artoriasbot:
             raise ValueError("GEMINI_API_KEY não configurada nas variáveis de ambiente.")
         genai.configure(api_key=gemini_api_key)
         
-        # ATUALIZADO: Inicializando o modelo Gemini com temperature = 0.2
-        self.gemini_model = genai.GenerativeModel('gemini-2.0-flash', generation_config={"temperature": 0.2})
+        self.gemini_model = genai.GenerativeModel('gemini-2.0-flash', generation_config={"temperature": 0.2}) # Mantendo a temperatura baixa
         print("Artoriasbot: Modelo Gemini inicializado com sucesso com temperature 0.2.")
 
     async def _init_db_pool(self):
@@ -87,28 +86,28 @@ class Artoriasbot:
         extracted_data = {} 
 
         try:
+            # INSTRUÇÕES ATUALIZADAS PARA MÁXIMA DISCIPLINA E FOCO NO FLUXO
             system_instruction = (
-                f"Você é Artorias AI, um assistente inteligente e **altamente disciplinado** para a Tralhotec, uma empresa de soluções de TI.\n"
-                f"Sua missão é **ESTRITAMENTE guiar o usuário pelos fluxos de SDR ou Suporte para coletar as informações necessárias e gerar o JSON estruturado.**\n"
-                f"**SEMPRE peça apenas UMA informação por vez, de forma concisa.**\n"
-                f"**NÃO FORNEÇA SOLUÇÕES, INFORMAÇÕES DETALHADAS, OPÇÕES EXTENSAS OU RESPOSTAS DE FAQ LONGA DURANTE QUALQUER FLUXO DE COLETA DE DADOS.**\n"
-                f"Mantenha-se focado(a) em pedir a próxima informação na sequência. Responda de forma concisa e direta ao ponto.\n"
+                f"Você é Artorias AI, um assistente inteligente para a Tralhotec. Sua **ÚNICA** missão é qualificar leads e encaminhar suporte técnico, **SEGUINDO RIGOROSAMENTE AS SEQUÊNCIAS DE PERGUNTAS E A GERAÇÃO DE JSON.**\n"
+                f"**NÃO FORNEÇA SOLUÇÕES, INFORMAÇÕES ADICIONAIS, LISTAS, DICAS OU RESPOSTAS DE FAQ DE FORMA PROATIVA.**\n"
+                f"**SEMPRE peça apenas UMA informação por vez, de forma concisa e direta.**\n"
+                f"Sua prioridade máxima é a conclusão do fluxo de coleta de dados e a geração do JSON.\n"
                 f"\n"
                 f"Suas responsabilidades são:\n"
-                f"1.  **Atendimento Geral (FAQ):** Se for uma pergunta de FAQ genuína (NÃO parte de um fluxo de SDR/Suporte em andamento), forneça a resposta EXTREMAMENTE concisa (máximo 1-2 frases). Priorize sempre a qualificação/escalada se a mensagem tiver duplo sentido.\n"
-                f"2.  **Qualificação SDR (sequencial):** Se o usuário demonstrar interesse em vendas, orçamentos, propostas, ou falar com um especialista/consultor de vendas, inicie o processo de qualificação de SDR. Colete as seguintes informações **EXATAMENTE nesta ordem**:\n"
+                f"1.  **Atendimento Geral (FAQ):** Se o usuário fizer uma pergunta de FAQ que NÃO se encaixe em um fluxo de SDR/Suporte, responda com uma frase muito curta e genérica como 'Posso ajudar com informações sobre a Tralhotec. Qual a sua necessidade?' ou 'Seu foco principal é qualificação de leads ou suporte técnico?'. Evite dar a resposta da FAQ diretamente se for longa. Sempre tente redirecionar para um dos seus fluxos.\n"
+                f"2.  **Qualificação SDR (sequencial e restrita):** Se o usuário demonstrar interesse em vendas, orçamentos, propostas, ou falar com um especialista/consultor de vendas, inicie o processo de qualificação de SDR. Colete as seguintes informações **EXATAMENTE nesta ordem e sem desviar**:\n"
                 f"    a. Nome completo e função/cargo.\n"
                 f"    b. Nome da empresa.\n"
-                f"    c. Principais desafios/necessidades (curto e direto, sem oferecer soluções).\n"
+                f"    c. Principais desafios/necessidades (peça a descrição, mas **NÃO ofereça soluções ou liste opções**).\n"
                 f"    d. Tamanho da empresa (Ex: até 10, 11-50, 50+).\n"
-                f"    e. E-mail de contato e/ou número de WhatsApp (último passo da qualificação SDR).\n"
-                f"    Ao final do fluxo SDR (após **TODAS** as informações serem coletadas), forneça uma breve resposta de texto final para o usuário (agradecendo e informando o contato do SDR) e, em uma nova linha, **então adicione o bloco JSON**.\n"
+                f"    e. E-mail de contato e/ou número de WhatsApp.\n"
+                f"    Ao final do fluxo SDR (após **TODAS** as informações serem coletadas), forneça a resposta de texto final para o usuário (agradecendo e informando o contato do SDR) e, em uma nova linha, **então adicione o bloco JSON**.\n"
                 f"    ```json\n"
                 f"    {{\"action\": \"sdr_completed\", \"lead_info\": {{\"nome\": \"[Nome]\", \"funcao\": \"[Funcao]\", \"empresa\": \"[Empresa]\", \"desafios\": \"[Desafios]\", \"tamanho\": \"[Tamanho]\", \"email\": \"[Email]\", \"whatsapp\": \"[WhatsApp]\"}}}}\n"
                 f"    ```\n"
                 f"    Substitua os placeholders `[Nome]`, `[Funcao]`, etc., pelos dados coletados.\n"
-                f"3.  **Suporte Técnico (sequencial):** Se o usuário tiver um problema técnico ou precisar de ajuda, inicie o processo de suporte. Colete as seguintes informações **EXATAMENTE nesta ordem**:\n"
-                f"    a. Descrição detalhada do problema (mantenha o foco no problema, sem oferecer soluções).\n"
+                f"3.  **Suporte Técnico (sequencial e restrito):** Se o usuário tiver um problema técnico ou precisar de ajuda, inicie o processo de suporte. Colete as seguintes informações **EXATAMENTE nesta ordem**:\n"
+                f"    a. Descrição detalhada do problema (mantenha o foco na descrição do problema, **NÃO ofereça soluções ou dicas**).\n"
                 f"    b. Informações de contato (nome, e-mail, empresa) se for necessária escalada.\n"
                 f"    Ao final do fluxo de Suporte (problema e contato coletados), forneça uma breve resposta de texto final para o usuário (agradecendo e informando o encaminhamento) e, em uma nova linha, **então adicione o bloco JSON**.\n"
                 f"    ```json\n"
@@ -117,8 +116,8 @@ class Artoriasbot:
                 f"    Substitua os placeholders `[Problema]`, `[Nome Contato]`, etc., pelos dados coletados.\n"
                 f"4.  **Comportamento Geral:**\n"
                 f"    - Mantenha um tom profissional e útil.\n"
-                f"    - **PRIORIZE a coleta de dados e a geração do JSON.**\n"
-                f"    - Se o usuário se desviar do fluxo ou perguntar algo não relacionado no meio de um fluxo, gentilmente redirecione-o para a próxima informação que você precisa.\n"
+                f"    - **Sua única meta é coletar as informações do fluxo e gerar o JSON. Tudo mais é secundário.**\n"
+                f"    - Se o usuário se desviar do fluxo ou perguntar algo não relacionado no meio de um fluxo, **gentilmente mas FIRMEMENTE, redirecione-o para a próxima informação que você precisa**.\n"
                 f"    - Se não entender, peça para o usuário reformular.\n"
                 f"    - Se o usuário se despedir ou agradecer, responda de forma cordial e encerre o tópico.\n"
                 f"---"
@@ -155,11 +154,9 @@ class Artoriasbot:
                         extracted_data = json.loads(json_str)
                         print(f"Artoriasbot: JSON extraído: {extracted_data}")
                         
-                        # --- NOVA LÓGICA: SALVAR DADOS EXTRAÍDOS NO BANCO DE DADOS ---
                         action_type = extracted_data.get("action", "unknown")
                         if action_type in ["sdr_completed", "support_escalated"]:
                             await self._save_extracted_data(user_id, extracted_data, action_type)
-                        # --- FIM DA NOVA LÓGICA ---
                         
                         response_text = response_content[:json_start_index].strip()
                         
@@ -168,7 +165,7 @@ class Artoriasbot:
                         if not response_text:
                             print(f"DEBUG: response_text está vazio. Tentando resposta padrão.")
                             action = extracted_data.get("action", "")
-                            print(f"DEBUG: Ação extraída do JSON: '{action}'")
+                            print(f"DEBUG: Ação extraída do JSON: '{action}')")
 
                             if "sdr_completed" in action:
                                 response_text = "Perfeito! Agradeço as informações. Um dos nossos SDRs entrará em contato em breve para agendar uma conversa com um consultor de vendas."
@@ -182,17 +179,10 @@ class Artoriasbot:
                     except json.JSONDecodeError as e:
                         print(f"Artoriasbot: ERRO ao parsear JSON: {e}")
                         extracted_data = {} 
-                # --- FIM DA LÓGICA DE EXTRAÇÃO DE JSON ---
-
-                # --- NOVA LÓGICA: SALVAR CADA TURNO DA CONVERSA NO BANCO DE DADOS ---
-                # Salva a mensagem do usuário
+                
                 await self._save_conversation_entry(user_id, "user", user_message)
-                # Salva a resposta do Gemini (texto)
                 await self._save_conversation_entry(user_id, "model", response_text)
 
-                # Atualiza nosso histórico local com o histórico da sessão do Gemini.
-                # A sessão do Gemini já foi atualizada pelo chat_session.send_message.
-                # Apenas sincronizamos nosso estado local com o que o Gemini tem.
                 current_flow_state["history"] = [
                     {"role": entry.role, "parts": [part.text for part in entry.parts if hasattr(part, 'text')]}
                     for entry in chat_session.history
