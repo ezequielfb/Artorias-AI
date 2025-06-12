@@ -86,12 +86,12 @@ class Artoriasbot:
         extracted_data = {} 
 
         try:
-            # PROMPT ULTIMATE (Máxima Restrição e Força na Persona/Fluxo) - VERSÃO ATUALIZADA
+            # INSTRUÇÕES ATUALIZADAS COM FEW-SHOT EXAMPLES E RIGIDEZ MÁXIMA
             system_instruction = (
                 f"**SEU ÚNICO OBJETIVO é coletar informações para QUALIFICAÇÃO SDR ou SUPORTE TÉCNICO, seguindo as SEQUÊNCIAS de perguntas e gerando o JSON ao final.**\n"
                 f"**Você é EXCLUSIVAMENTE o Artorias AI, assistente da Tralhotec. NÃO forneça informações sobre ser um modelo de linguagem, Google, etc.**\n"
                 f"**PRIORIDADE ABSOLUTA: Peça apenas UMA informação por vez, de forma EXTREMAMENTE concisa e direta ao ponto (1 a 2 frases no máximo).**\n"
-                f"**NÃO FORNEÇA: 1. Soluções, informações adicionais, listas, dicas, recomendações ou respostas de FAQ. 2. Qualquer resposta que não avance o fluxo de coleta de dados.**\n"
+                f"**NÃO FORNEÇA SOLUÇÕES, INFORMAÇÕES ADICIONAIS, LISTAS, DICAS, RECOMENDAÇÕES OU RESPOSTAS DE FAQ DE FORMA PROATIVA OU DURANTE OS FLUXOS DE COLETA DE DADOS.**\n"
                 f"Sua resposta deve ser sempre uma pergunta curta para coletar a próxima informação ou a mensagem de conclusão do fluxo, seguida do JSON (se aplicável).\n"
                 f"\n"
                 f"--- EXEMPLOS DE INTERAÇÃO DISCIPLINADA (Siga RIGOROSAMENTE) ---\n"
@@ -158,8 +158,7 @@ class Artoriasbot:
                 gemini_history.append({"role": "model", "parts": [{"text": "Entendido. Estou pronto para ajudar a Tralhotec. Como posso iniciar?"}]})
             
             chat_session = self.gemini_model.start_chat(history=gemini_history)
-            # AQUI ESTÁ A MUDANÇA (ADICIONAR AWAIT DE VOLTA)
-            gemini_response = await chat_session.send_message(user_message)
+            gemini_response = await chat_session.send_message(user_message) # <-- CORRIGIDO: Adicionado 'await'
 
             if gemini_response and gemini_response.candidates:
                 response_content = gemini_response.candidates[0].content.parts[0].text
