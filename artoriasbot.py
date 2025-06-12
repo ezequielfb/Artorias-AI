@@ -3,25 +3,21 @@ import traceback
 import google.generativeai as genai
 import os
 import json
-import asyncpg # <-- Adicionado: Importa o driver assíncrono para PostgreSQL
+import asyncpg
 
 class Artoriasbot:
     def __init__(self):
-        # O dicionário conversation_states agora será usado como um cache temporário,
-        # mas o estado real será salvo e carregado do banco de dados.
         self.conversation_states = {} 
-        self.db_pool = None # Pool de conexões com o banco de dados
+        self.db_pool = None 
 
         gemini_api_key = os.environ.get("GEMINI_API_KEY")
         if not gemini_api_key:
             raise ValueError("GEMINI_API_KEY não configurada nas variáveis de ambiente.")
         genai.configure(api_key=gemini_api_key)
         
-        self.gemini_model = genai.GenerativeModel('gemini-2.0-flash') 
-        print("Artoriasbot: Modelo Gemini inicializado com sucesso.")
-
-        # O pool de conexões será inicializado na primeira vez que for necessário,
-        # dentro dos métodos de acesso ao BD.
+        # ATUALIZADO: Inicializando o modelo Gemini com temperature = 0.2
+        self.gemini_model = genai.GenerativeModel('gemini-2.0-flash', generation_config={"temperature": 0.2})
+        print("Artoriasbot: Modelo Gemini inicializado com sucesso com temperature 0.2.")
 
     async def _init_db_pool(self):
         """Inicializa o pool de conexões com o banco de dados."""
@@ -30,18 +26,13 @@ class Artoriasbot:
             if not db_url:
                 raise ValueError("DATABASE_URL não configurada nas variáveis de ambiente.")
             
-            # Cria um pool de conexões. Isso é mais eficiente do que abrir e fechar conexões para cada requisição.
             self.db_pool = await asyncpg.create_pool(db_url)
             print("Artoriasbot: Pool de conexões com o banco de dados inicializado com sucesso.")
 
     async def _load_conversation_history(self, user_id: str) -> list:
         """Carrega o histórico de conversas de um usuário do banco de dados."""
-        await self._init_db_pool() # Garante que o pool está inicializado
+        await self._init_db_pool() 
         async with self.db_pool.acquire() as conn:
-            # Query para buscar histórico de conversas.
-            # Ordenado por timestamp para garantir a ordem correta.
-            # Assumimos que a tabela 'conversation_history' existe e tem colunas 'user_id', 'role', 'content', 'timestamp'.
-            # A coluna 'content' armazenará o texto.
             history_records = await conn.fetch(
                 """
                 SELECT role, content
@@ -51,15 +42,13 @@ class Artoriasbot:
                 """,
                 user_id
             )
-            # Converte os registros do banco de dados para o formato esperado pelo Gemini
-            # 'parts' é uma lista de objetos, aqui simplificamos para apenas o texto.
             history = [{"role": r['role'], "parts": [{"text": r['content']}]} for r in history_records]
             print(f"Artoriasbot: Histórico carregado para '{user_id}': {len(history)} entradas.")
             return history
 
     async def _save_conversation_entry(self, user_id: str, role: str, content: str):
         """Salva uma entrada de conversa no histórico do banco de dados."""
-        await self._init_db_pool() # Garante que o pool está inicializado
+        await self._init_db_pool() 
         async with self.db_pool.acquire() as conn:
             await conn.execute(
                 """
@@ -68,28 +57,23 @@ class Artoriasbot:
                 """,
                 user_id, role, content
             )
-            # print(f"Artoriasbot: Entrada de conversa salva para '{user_id}' (role: {role}).") # Comentado para evitar logs muito longos
 
     async def _save_extracted_data(self, user_id: str, data: dict, action_type: str):
         """Salva os dados estruturados extraídos (SDR/Suporte) no banco de dados."""
-        await self._init_db_pool() # Garante que o pool está inicializado
+        await self._init_db_pool() 
         async with self.db_pool.acquire() as conn:
-            # Assumimos que a tabela 'extracted_leads_tickets' existe.
-            # Colunas: user_id, action_type, data_json (jsonb), timestamp.
             await conn.execute(
                 """
                 INSERT INTO extracted_leads_tickets (user_id, action_type, data_json, timestamp)
                 VALUES ($1, $2, $3::jsonb, NOW());
                 """,
-                user_id, action_type, json.dumps(data) # Salva o dicionário Python como JSONB no Postgre
+                user_id, action_type, json.dumps(data) 
             )
             print(f"Artoriasbot: Dados extraídos de '{action_type}' salvos para '{user_id}'.")
 
     async def process_message(self, user_message: str, user_id: str = "default_user") -> str:
         print(f"Artoriasbot: Processando mensagem de '{user_id}': '{user_message}'")
 
-        # --- NOVA LÓGICA: CARREGAR HISTÓRICO DO BANCO DE DADOS ---
-        # Tenta carregar o histórico do banco de dados primeiro.
         try:
             gemini_history = await self._load_conversation_history(user_id)
             current_flow_state = {"state": "initial", "history": gemini_history}
@@ -98,37 +82,34 @@ class Artoriasbot:
             traceback.print_exc(file=sys.stdout)
             gemini_history = []
             current_flow_state = {"state": "initial", "history": []}
-        # --- FIM DA NOVA LÓGICA ---
         
         response_text = "Desculpe, não consegui processar sua requisição no momento. Tente novamente."
         extracted_data = {} 
 
         try:
-            # INSTRUÇÕES ATUALIZADAS PARA SAÍDA ESTRUTURADA E FLUXOS
-            # AQUI: Pedimos explicitamente para o Gemini primeiro dar a resposta em linguagem natural,
-            # E SÓ DEPOIS incluir o JSON.
             system_instruction = (
-                f"Você é Artorias AI, um assistente inteligente para a Tralhotec, uma empresa de soluções de TI.\n"
-                f"Sua missão é estritamente guiar o usuário pelos fluxos de SDR ou Suporte para coletar as informações necessárias e gerar o JSON estruturado.\n"
-                f"**NÃO FORNEÇA SOLUÇÕES DETALHADAS, INFORMAÇÕES EXTENSAS OU RESPOSTAS DE FAQ LONGA DURANTE OS FLUXOS DE COLETA DE DADOS.**\n"
+                f"Você é Artorias AI, um assistente inteligente e **altamente disciplinado** para a Tralhotec, uma empresa de soluções de TI.\n"
+                f"Sua missão é **ESTRITAMENTE guiar o usuário pelos fluxos de SDR ou Suporte para coletar as informações necessárias e gerar o JSON estruturado.**\n"
+                f"**SEMPRE peça apenas UMA informação por vez, de forma concisa.**\n"
+                f"**NÃO FORNEÇA SOLUÇÕES, INFORMAÇÕES DETALHADAS, OPÇÕES EXTENSAS OU RESPOSTAS DE FAQ LONGA DURANTE QUALQUER FLUXO DE COLETA DE DADOS.**\n"
                 f"Mantenha-se focado(a) em pedir a próxima informação na sequência. Responda de forma concisa e direta ao ponto.\n"
                 f"\n"
                 f"Suas responsabilidades são:\n"
-                f"1.  **Atendimento Geral (FAQ):** Responda perguntas sobre preços, implementação, Microsoft Teams, gestão de documentação e contratos. Se for uma pergunta de FAQ genuína (não parte de um fluxo de SDR/Suporte), forneça a resposta diretamente, mas mantenha-a concisa (máximo 3 frases).\n"
-                f"2.  **Qualificação SDR:** Se o usuário demonstrar interesse em vendas, orçamentos, propostas, ou falar com um especialista/consultor de vendas, inicie o processo de qualificação de SDR. Colete as seguintes informações sequencialmente:\n"
+                f"1.  **Atendimento Geral (FAQ):** Se for uma pergunta de FAQ genuína (NÃO parte de um fluxo de SDR/Suporte em andamento), forneça a resposta EXTREMAMENTE concisa (máximo 1-2 frases). Priorize sempre a qualificação/escalada se a mensagem tiver duplo sentido.\n"
+                f"2.  **Qualificação SDR (sequencial):** Se o usuário demonstrar interesse em vendas, orçamentos, propostas, ou falar com um especialista/consultor de vendas, inicie o processo de qualificação de SDR. Colete as seguintes informações **EXATAMENTE nesta ordem**:\n"
                 f"    a. Nome completo e função/cargo.\n"
                 f"    b. Nome da empresa.\n"
-                f"    c. Principais desafios/necessidades.\n"
+                f"    c. Principais desafios/necessidades (curto e direto, sem oferecer soluções).\n"
                 f"    d. Tamanho da empresa (Ex: até 10, 11-50, 50+).\n"
                 f"    e. E-mail de contato e/ou número de WhatsApp (último passo da qualificação SDR).\n"
-                f"    Ao final do fluxo SDR (após **todas** as informações serem coletadas), forneça uma breve resposta de texto final para o usuário (agradecendo e informando o contato do SDR) e, em uma nova linha, **então adicione o bloco JSON**.\n"
+                f"    Ao final do fluxo SDR (após **TODAS** as informações serem coletadas), forneça uma breve resposta de texto final para o usuário (agradecendo e informando o contato do SDR) e, em uma nova linha, **então adicione o bloco JSON**.\n"
                 f"    ```json\n"
                 f"    {{\"action\": \"sdr_completed\", \"lead_info\": {{\"nome\": \"[Nome]\", \"funcao\": \"[Funcao]\", \"empresa\": \"[Empresa]\", \"desafios\": \"[Desafios]\", \"tamanho\": \"[Tamanho]\", \"email\": \"[Email]\", \"whatsapp\": \"[WhatsApp]\"}}}}\n"
                 f"    ```\n"
                 f"    Substitua os placeholders `[Nome]`, `[Funcao]`, etc., pelos dados coletados.\n"
-                f"3.  **Suporte Técnico:** Se o usuário tiver um problema técnico ou precisar de ajuda, inicie o processo de suporte. Colete:\n"
-                f"    a. Descrição detalhada do problema.\n"
-                f"    b. Informações de contato (nome, e-mail, empresa) se for necessária escalada (peça após a descrição do problema).\n"
+                f"3.  **Suporte Técnico (sequencial):** Se o usuário tiver um problema técnico ou precisar de ajuda, inicie o processo de suporte. Colete as seguintes informações **EXATAMENTE nesta ordem**:\n"
+                f"    a. Descrição detalhada do problema (mantenha o foco no problema, sem oferecer soluções).\n"
+                f"    b. Informações de contato (nome, e-mail, empresa) se for necessária escalada.\n"
                 f"    Ao final do fluxo de Suporte (problema e contato coletados), forneça uma breve resposta de texto final para o usuário (agradecendo e informando o encaminhamento) e, em uma nova linha, **então adicione o bloco JSON**.\n"
                 f"    ```json\n"
                 f"    {{\"action\": \"support_escalated\", \"ticket_info\": {{\"problema\": \"[Problema]\", \"nome_contato\": \"[Nome Contato]\", \"email_contato\": \"[Email Contato]\", \"empresa_contato\": \"[Empresa Contato]\"}}}}\n"
@@ -136,14 +117,14 @@ class Artoriasbot:
                 f"    Substitua os placeholders `[Problema]`, `[Nome Contato]`, etc., pelos dados coletados.\n"
                 f"4.  **Comportamento Geral:**\n"
                 f"    - Mantenha um tom profissional e útil.\n"
-                f"    - **Peça apenas UMA informação por vez** e aguarde a resposta antes de pedir a próxima.\n"
-                f"    - Se o usuário fornecer múltiplas informações de uma vez, reconheça o que foi dado e peça a **próxima informação pendente** na sequência do fluxo.\n"
+                f"    - **PRIORIZE a coleta de dados e a geração do JSON.**\n"
+                f"    - Se o usuário se desviar do fluxo ou perguntar algo não relacionado no meio de um fluxo, gentilmente redirecione-o para a próxima informação que você precisa.\n"
                 f"    - Se não entender, peça para o usuário reformular.\n"
                 f"    - Se o usuário se despedir ou agradecer, responda de forma cordial e encerre o tópico.\n"
                 f"---"
             )
 
-            if not current_flow_state["history"]: # Verifica se o histórico carregado do BD está vazio
+            if not gemini_history: 
                 gemini_history.append({"role": "user", "parts": [{"text": system_instruction}]})
                 gemini_history.append({"role": "model", "parts": [{"text": "Entendido. Estou pronto para ajudar a Tralhotec. Como posso iniciar?"}]})
             
@@ -187,7 +168,7 @@ class Artoriasbot:
                         if not response_text:
                             print(f"DEBUG: response_text está vazio. Tentando resposta padrão.")
                             action = extracted_data.get("action", "")
-                            print(f"DEBUG: Ação extraída do JSON: '{action}')")
+                            print(f"DEBUG: Ação extraída do JSON: '{action}'")
 
                             if "sdr_completed" in action:
                                 response_text = "Perfeito! Agradeço as informações. Um dos nossos SDRs entrará em contato em breve para agendar uma conversa com um consultor de vendas."
