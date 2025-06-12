@@ -2,8 +2,8 @@ from flask import Flask, request, jsonify
 import os
 from dotenv import load_dotenv
 import traceback
-import asyncio
-from flask_cors import CORS # <-- ADICIONADO: Importa a extensão Flask-CORS
+import asyncio 
+# from flask_cors import CORS # <-- Removido: Não é mais necessário
 
 # Importa o seu bot Artorias AI.
 from artoriasbot import Artoriasbot
@@ -12,7 +12,7 @@ from artoriasbot import Artoriasbot
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app) # <-- ADICIONADO: Inicializa CORS para a sua aplicação Flask
+# CORS(app) # <-- Removido: Não é mais necessário
 
 # --- Inicialização do Artoriasbot ---
 try:
@@ -24,35 +24,32 @@ except Exception as e:
     exit(1) # Sai do programa
 
 
-@app.route("/api/messages", methods=["POST", "OPTIONS"]) # <-- ATUALIZADO: Adiciona 'OPTIONS' aqui
+@app.route("/api/messages", methods=["POST"]) # <-- Removido "OPTIONS"
 def messages():
     """
     Endpoint HTTP para receber mensagens do usuário.
     Espera um JSON com um campo 'text' (ou 'message'/'content', podemos padronizar).
     """
-    # A requisição OPTIONS é um "preflight" do CORS.
-    # Se o navegador fez um OPTIONS, apenas retorne OK com os cabeçalhos CORS (Flask-CORS cuida disso).
-    if request.method == 'OPTIONS':
-        return '', 200 # Responde OK para o OPTIONS e Flask-CORS adiciona os cabeçalhos necessários
-
+    # Removida a lógica do OPTIONS, pois Flask-CORS não será usado
+    # if request.method == 'OPTIONS':
+    #     return '', 200 
 
     if not request.is_json:
         return jsonify({"error": "Content-Type deve ser application/json"}), 415
 
     try:
         data = request.get_json()
-        user_message = data.get("text") # Ou 'message', ou 'content'
+        user_message = data.get("text") 
         
         if not user_message:
             return jsonify({"error": "Campo 'text' (ou 'message') não encontrado na requisição"}), 400
 
         print(f"Flask: Mensagem recebida do usuário: '{user_message}'")
 
-        # --- Como lidar com asyncio em Flask ---
         try:
             try:
                 loop = asyncio.get_event_loop()
-            except RuntimeError:
+            except RuntimeError: 
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
             

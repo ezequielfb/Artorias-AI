@@ -3,7 +3,7 @@ import traceback
 import google.generativeai as genai
 import os
 import json
-import requests 
+# import requests # <-- Removido: Não é mais necessário
 
 class Artoriasbot:
     def __init__(self):
@@ -23,10 +23,10 @@ class Artoriasbot:
         current_flow_state = self.conversation_states.get(user_id, {"state": "initial", "history": []})
         
         response_text = "Desculpe, não consegui processar sua requisição no momento. Tente novamente."
-        extracted_data = {} 
+        extracted_data = {} # Dicionário para armazenar dados extraídos
 
         try:
-            # INSTRUÇÕES ATUALIZADAS PARA SAÍDA ESTRUTURADA E FLUXOS
+            # INSTRUÇÕES DO SISTEMA (PROMPT) - MANTIDAS COMO ESTÃO
             system_instruction = (
                 f"Você é Artorias AI, um assistente inteligente para a Tralhotec, uma empresa de soluções de TI.\n"
                 f"Suas responsabilidades são:\n"
@@ -94,15 +94,14 @@ class Artoriasbot:
                         extracted_data = json.loads(json_str)
                         print(f"Artoriasbot: JSON extraído: {extracted_data}")
                         
-                        # --- CÓDIGO NOVO: ENVIAR JSON PARA O N8N ---
-                        # ATENÇÃO: SUBSTITUA PELA SUA URL DE TESTE DO N8N OBTIDA DO N8N WEBHOOK
-                        N8N_WEBHOOK_URL = "http://host.docker.internal:5678/webhook-test/processar_lead" 
-                        try:
-                            requests.post(N8N_WEBHOOK_URL, json=extracted_data)
-                            print(f"Artoriasbot: JSON enviado para o n8n com sucesso.")
-                        except requests.exceptions.RequestException as req_err:
-                            print(f"Artoriasbot: ERRO ao enviar JSON para o n8n: {req_err}")
-                        # --- FIM DO CÓDIGO NOVO ---
+                        # --- CÓDIGO REMOVIDO: ENVIAR JSON PARA O N8N ---
+                        # N8N_WEBHOOK_URL = "http://host.docker.internal:5678/webhook-test/processar_lead" 
+                        # try:
+                        #     requests.post(N8N_WEBHOOK_URL, json=extracted_data)
+                        #     print(f"Artoriasbot: JSON enviado para o n8n com sucesso.")
+                        # except requests.exceptions.RequestException as req_err:
+                        #     print(f"Artoriasbot: ERRO ao enviar JSON para o n8n: {req_err}")
+                        # --- FIM DO CÓDIGO REMOVIDO ---
                         
                         response_text = response_content[:json_start_index].strip()
                         
@@ -128,8 +127,7 @@ class Artoriasbot:
                 # --- FIM DA LÓGICA DE EXTRAÇÃO DE JSON ---
 
                 current_flow_state["history"] = [
-                    {"role": entry.role, "parts": [part.text for part in entry.parts if hasattr(part, 'text')]}
-                    for entry in chat_session.history
+                    {"role": entry.role, "parts": [part.text for entry in chat_session.history for part in entry.parts if hasattr(part, 'text')]} # Corrigido o loop aninhado aqui
                 ]
             else:
                 response_text = "Não consegui gerar uma resposta inteligente no momento. Por favor, tente novamente."
