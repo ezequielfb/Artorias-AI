@@ -15,7 +15,7 @@ class Artoriasbot:
             raise ValueError("GEMINI_API_KEY não configurada nas variáveis de ambiente.")
         genai.configure(api_key=gemini_api_key)
         
-        self.gemini_model = genai.GenerativeModel('gemini-2.0-flash', generation_config={"temperature": 0.2, "max_output_tokens": 100}) 
+        self.gemini_model = genai.GenerativeModel('gemini-2.0-flash', generation_config={"temperature": 0.1, "max_output_tokens": 100}) 
         print("Artoriasbot: Modelo Gemini inicializado com sucesso com temperature 0.2 e max_output_tokens 100.")
 
     async def _init_db_pool(self):
