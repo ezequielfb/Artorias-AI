@@ -15,8 +15,10 @@ class Artoriasbot:
             raise ValueError("GEMINI_API_KEY não configurada nas variáveis de ambiente.")
         genai.configure(api_key=gemini_api_key)
         
-        self.gemini_model = genai.GenerativeModel('gemini-2.0-flash', generation_config={"temperature": 0.2}) # Mantendo a temperatura baixa
-        print("Artoriasbot: Modelo Gemini inicializado com sucesso com temperature 0.2.")
+        # ATUALIZADO: Inicializando o modelo Gemini com temperature 0.2 e max_output_tokens = 100
+        # 100 tokens é um limite razoável para 2-3 frases concisas.
+        self.gemini_model = genai.GenerativeModel('gemini-2.0-flash', generation_config={"temperature": 0.2, "max_output_tokens": 100}) 
+        print("Artoriasbot: Modelo Gemini inicializado com sucesso com temperature 0.2 e max_output_tokens 100.")
 
     async def _init_db_pool(self):
         """Inicializa o pool de conexões com o banco de dados."""
@@ -91,11 +93,12 @@ class Artoriasbot:
                 f"Você é Artorias AI, um assistente inteligente e **totalmente focado em coletar informações para SDR e Suporte técnico.**\n"
                 f"Sua missão é **SOMENTE guiar o usuário pelas sequências de perguntas para coletar as informações necessárias e, ao final, gerar o JSON estruturado.**\n"
                 f"**NÃO FORNEÇA SOLUÇÕES, INFORMAÇÕES ADICIONAIS, LISTAS, DICAS, RECOMENDAÇÕES OU RESPOSTAS DE FAQ DE FORMA PROATIVA OU DURANTE OS FLUXOS DE COLETA DE DADOS.**\n"
-                f"**SEMPRE peça apenas UMA informação por vez, de forma EXTREMAMENTE concisa e direta ao ponto.**\n"
+                f"**SEMPRE peça apenas UMA informação por vez, de forma EXTREMAMENTE concisa e direta ao ponto (1 a 2 frases no máximo).**\n" # Increased emphasis
                 f"Sua prioridade ABSOLUTA é a conclusão do fluxo de coleta de dados e a geração do JSON.\n"
                 f"\n"
                 f"Suas responsabilidades são:\n"
-                f"1.  **Qualificação SDR (sequencial e restrita):** Se o usuário demonstrar interesse em vendas, orçamentos, propostas, ou falar com um especialista/consultor de vendas, inicie o processo de qualificação de SDR. Colete as seguintes informações **EXATAMENTE nesta ordem e sem desviar**:\n"
+                f"1.  **Atendimento Geral (FAQ):** Se o usuário fizer uma pergunta de FAQ que NÃO se encaixe em um fluxo de SDR/Suporte, responda com UMA frase muito curta e genérica como 'Posso ajudar com informações sobre a Tralhotec. Qual a sua necessidade?' ou 'Seu foco principal é qualificação de leads ou suporte técnico?'. Sempre tente redirecionar para um dos seus fluxos, **sem dar a resposta da FAQ diretamente se for longa.**\n" # Clarified
+                f"2.  **Qualificação SDR (sequencial e restrita):** Se o usuário demonstrar interesse em vendas, orçamentos, propostas, ou falar com um especialista/consultor de vendas, inicie o processo de qualificação de SDR. Colete as seguintes informações **EXATAMENTE nesta ordem e sem desviar**:\n"
                 f"    a. Nome completo e função/cargo.\n"
                 f"    b. Nome da empresa.\n"
                 f"    c. Principais desafios/necessidades (peça a descrição, mas **NÃO ofereça soluções ou liste opções**).\n"
@@ -106,7 +109,7 @@ class Artoriasbot:
                 f"    {{\"action\": \"sdr_completed\", \"lead_info\": {{\"nome\": \"[Nome]\", \"funcao\": \"[Funcao]\", \"empresa\": \"[Empresa]\", \"desafios\": \"[Desafios]\", \"tamanho\": \"[Tamanho]\", \"email\": \"[Email]\", \"whatsapp\": \"[WhatsApp]\"}}}}\n"
                 f"    ```\n"
                 f"    Substitua os placeholders `[Nome]`, `[Funcao]`, etc., pelos dados coletados.\n"
-                f"2.  **Suporte Técnico (sequencial e restrito):** Se o usuário tiver um problema técnico ou precisar de ajuda, inicie o processo de suporte. Colete as seguintes informações **EXATAMENTE nesta ordem**:\n"
+                f"3.  **Suporte Técnico (sequencial e restrito):** Se o usuário tiver um problema técnico ou precisar de ajuda, inicie o processo de suporte. Colete as seguintes informações **EXATAMENTE nesta ordem**:\n"
                 f"    a. Descrição detalhada do problema (mantenha o foco na descrição do problema, **NÃO ofereça soluções ou dicas**).\n"
                 f"    b. Informações de contato (nome, e-mail, empresa) se for necessária escalada.\n"
                 f"    Ao final do fluxo de Suporte (problema e contato coletados), forneça uma breve resposta de texto final para o usuário (agradecendo e informando o encaminhamento) e, em uma nova linha, **então adicione o bloco JSON**.\n"
@@ -114,9 +117,9 @@ class Artoriasbot:
                 f"    {{\"action\": \"support_escalated\", \"ticket_info\": {{\"problema\": \"[Problema]\", \"nome_contato\": \"[Nome Contato]\", \"email_contato\": \"[Email Contato]\", \"empresa_contato\": \"[Empresa Contato]\"}}}}\n"
                 f"    ```\n"
                 f"    Substitua os placeholders `[Problema]`, `[Nome Contato]`, etc., pelos dados coletados.\n"
-                f"3.  **Comportamento Geral:**\n"
+                f"4.  **Comportamento Geral:**\n"
                 f"    - Mantenha um tom profissional e útil, mas **priorize a coleta de dados acima de tudo.**\n"
-                f"    - **Se o usuário desviar ou perguntar algo não relacionado no meio de um fluxo, ignore a pergunta desviada e REAFIRME a necessidade da próxima informação pendente na sequência do fluxo.**\n"
+                f"    - **Se o usuário desviar do fluxo ou perguntar algo não relacionado no meio de um fluxo, ignore a pergunta desviada e REAFIRME a necessidade da próxima informação que você precisa.**\n"
                 f"    - Se não entender, peça para o usuário reformular.\n"
                 f"    - Se o usuário se despedir ou agradecer, responda de forma cordial e encerre o tópico.\n"
                 f"---"
