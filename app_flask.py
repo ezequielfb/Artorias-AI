@@ -2,7 +2,7 @@ from flask import Flask, request, jsonify
 import os
 from dotenv import load_dotenv
 import traceback
-# import asyncio # <-- REMOVIDO (não precisaremos mais de um loop assíncrono aqui)
+import asyncio # <-- RE-ADICIONADO: Necessário para lidar com funções assíncronas
 from flask_cors import CORS 
 
 # Importa o seu bot Artorias AI.
@@ -42,11 +42,24 @@ def messages():
 
         print(f"Flask: Mensagem recebida do usuário: '{user_message}'")
 
-        # --- CHAMADA SÍNCRONA PARA O BOT ---
-        # Não precisa de loop asyncio aqui, pois BOT.process_message agora é síncrono.
-        bot_response_text = BOT.process_message(user_message, user_id="test_user_123") 
-        # --- FIM DA CHAMADA SÍNCRONA ---
+        # --- CHAMADA ASSÍNCRONA PARA O BOT ---
+        # Precisamos de asyncio para aguardar BOT.process_message
+        try:
+            # Obtém ou cria um loop de eventos para a thread atual
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
             
+            # Executa a função assíncrona process_message
+            bot_response_text = loop.run_until_complete(BOT.process_message(user_message, user_id="test_user_123"))
+            
+        except Exception as e:
+            print(f"ERRO: Falha ao processar a requisição no loop assíncrono: {e}")
+            traceback.print_exc()
+            return jsonify({"error": "Erro interno do servidor ao processar a mensagem."}), 500
+
         print(f"Flask: Resposta do bot: '{bot_response_text}'")
         return jsonify({"response": bot_response_text}), 200
 
