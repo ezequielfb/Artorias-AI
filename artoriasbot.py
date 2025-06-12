@@ -127,7 +127,7 @@ class Artoriasbot:
                 # --- FIM DA LÓGICA DE EXTRAÇÃO DE JSON ---
 
                 current_flow_state["history"] = [
-                    {"role": entry.role, "parts": [part.text for entry in chat_session.history for part in entry.parts if hasattr(part, 'text')]} # Corrigido o loop aninhado aqui
+ {"role": entry.role, "parts": [part.text for part in entry.parts if hasattr(part, 'text')]} for entry in chat_session.history
                 ]
             else:
                 response_text = "Não consegui gerar uma resposta inteligente no momento. Por favor, tente novamente."
