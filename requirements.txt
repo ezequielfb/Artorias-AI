@@ -3,4 +3,4 @@ gunicorn
 python-dotenv
 google-generativeai
 Flask-Cors
-asyncpg
+asyncpggit
