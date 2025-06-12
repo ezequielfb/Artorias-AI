@@ -3,113 +3,115 @@ import traceback
 import google.generativeai as genai
 import os
 import json
-# import asyncpg # BD temporariamente desativado.
-# requests # Removido, pois não é mais necessário para a funcionalidade atual.
+# import requests # <-- Removido: Não é mais necessário
 
 class Artoriasbot:
     def __init__(self):
-        self.conversation_states = {} # Histórico em memória
+        self.conversation_states = {} 
 
         gemini_api_key = os.environ.get("GEMINI_API_KEY")
         if not gemini_api_key:
             raise ValueError("GEMINI_API_KEY não configurada nas variáveis de ambiente.")
         genai.configure(api_key=gemini_api_key)
         
-        # Versão orgânica: sem temperature e sem max_output_tokens
         self.gemini_model = genai.GenerativeModel('gemini-2.0-flash') 
-        print("Artoriasbot: Modelo Gemini inicializado com sucesso (orgânico, sem restrições de temperatura/tokens).")
+        print("Artoriasbot: Modelo Gemini inicializado com sucesso.")
 
-    # Métodos de BD temporariamente desativados/removidos.
-    # def _init_db_pool(self): pass
-    # async def _load_conversation_history(self, user_id: str) -> list: return []
-    # async def _save_conversation_entry(self, user_id: str, role: str, content: str): pass
-    # async def _save_extracted_data(self, user_id: str, data: dict, action_type: str): pass
-
-    async def process_message(self, user_message: str, user_id: str = "default_user") -> str: # AGORA ASÍNCRONO (async def)
+    async def process_message(self, user_message: str, user_id: str = "default_user") -> str:
         print(f"Artoriasbot: Processando mensagem de '{user_id}': '{user_message}'")
 
         current_flow_state = self.conversation_states.get(user_id, {"state": "initial", "history": []})
         
         response_text = "Desculpe, não consegui processar sua requisição no momento. Tente novamente."
-        extracted_data = {} 
+        extracted_data = {} # Dicionário para armazenar dados extraídos
 
         try:
-            # PROMPT ORGÂNICO E INTELIGENTE: Processar tudo que o usuário der e pedir só o que falta
+            # INSTRUÇÕES DO SISTEMA (PROMPT) - MANTIDAS COMO ESTÃO
             system_instruction = (
                 f"Você é Artorias AI, um assistente inteligente para a Tralhotec, uma empresa de soluções de TI.\n"
-                f"Sua missão é guiar o usuário pelos fluxos de SDR ou Suporte Técnico. Você deve ser capaz de: \n"
-                f"1.  **Entender toda a informação fornecida em um único turno.** Se o usuário der múltiplas informações de uma vez (ex: nome, empresa e problema), processe todas elas.\n"
-                f"2.  **Identificar qual a próxima informação *FALTANTE*** na sequência do fluxo e pedir APENAS por ela.\n"
-                f"3.  **Gerar o JSON estruturado** ao final do fluxo, quando todas as informações forem coletadas.\n"
-                f"4.  **Manter um tom profissional e útil**, sendo conciso, mas completo na resposta.\n"
-                f"\n"
-                f"--- REGRAS DE FLUXO E COLETA DE DADOS ---\n"
-                f"1.  **QUALIFICAÇÃO SDR (SEQUÊNCIA PRIORITÁRIA):**\n"
-                f"    Informações a coletar sequencialmente para SDR:\n"
+                f"Suas responsabilidades são:\n"
+                f"1.  **Atendimento Geral (FAQ):** Responda perguntas sobre preços, implementação, Microsoft Teams, gestão de documentação e contratos. Se for uma pergunta de FAQ, forneça a resposta diretamente.\n"
+                f"2.  **Qualificação SDR:** Se o usuário demonstrar interesse em vendas, orçamentos, propostas, ou falar com um especialista/consultor de vendas, inicie o processo de qualificação de SDR. Colete as seguintes informações sequencialmente:\n"
                 f"    a. Nome completo e função/cargo.\n"
                 f"    b. Nome da empresa.\n"
                 f"    c. Principais desafios/necessidades.\n"
                 f"    d. Tamanho da empresa (Ex: até 10, 11-50, 50+).\n"
-                f"    e. E-mail de contato e/ou número de WhatsApp.\n"
-                f"    Ao final do fluxo SDR (todas as infos coletadas), inclua o JSON: \n"
+                f"    e. **E-mail de contato e/ou número de WhatsApp** (último passo da qualificação SDR).\n"
+                f"    Ao final do fluxo SDR (todas as informações serem coletadas), forneça a resposta de texto final para o usuário e, em uma nova linha, **então adicione o bloco JSON**.\n"
                 f"    ```json\n"
                 f"    {{\"action\": \"sdr_completed\", \"lead_info\": {{\"nome\": \"[Nome]\", \"funcao\": \"[Funcao]\", \"empresa\": \"[Empresa]\", \"desafios\": \"[Desafios]\", \"tamanho\": \"[Tamanho]\", \"email\": \"[Email]\", \"whatsapp\": \"[WhatsApp]\"}}}}\n"
                 f"    ```\n"
-                f"2.  **SUPORTE TÉCNICO (SEQUÊNCIA PRIORITÁRIA):**\n"
-                f"    Informações a coletar sequencialmente para Suporte:\n"
+                f"    Substitua os placeholders `[Nome]`, `[Funcao]`, etc., pelos dados coletados.\n"
+                f"3.  **Suporte Técnico:** Se o usuário tiver um problema técnico ou precisar de ajuda, inicie o processo de suporte. Colete:\n"
                 f"    a. Descrição detalhada do problema.\n"
-                f"    b. Informações de contato (nome, e-mail, empresa).\n"
-                f"    Ao final do fluxo de Suporte (todas as infos coletadas), inclua o JSON:\n"
+                f"    b. Informações de contato (nome, e-mail, empresa) se for necessária escalada (peça após a descrição do problema).\n"
+                f"    Ao final do fluxo de Suporte (problema e contato coletados), forneça a resposta de texto final para o usuário e, em uma nova linha, **então adicione o bloco JSON**.\n"
                 f"    ```json\n"
                 f"    {{\"action\": \"support_escalated\", \"ticket_info\": {{\"problema\": \"[Problema]\", \"nome_contato\": \"[Nome Contato]\", \"email_contato\": \"[Email Contato]\", \"empresa_contato\": \"[Empresa Contato]\"}}}}\n"
                 f"    ```\n"
-                f"\n"
-                f"--- COMPORTAMENTO GERAL ---\n"
-                f"1.  **Sempre tente encaixar o usuário em um dos fluxos (SDR ou Suporte).** Se a intenção for clara, comece pelo passo 1 do fluxo. Se o usuário fornecer informações para ambos os fluxos, priorize o SDR.\n"
-                f"2.  **Se o usuário fornecer todas as informações necessárias para um fluxo em um único turno, responda a mensagem final e inclua o JSON na mesma resposta.**\n"
-                f"3.  **Se o usuário desviar ou perguntar algo não relacionado no meio de um fluxo, gentilmente o redirecione ao fluxo, pedindo a próxima informação necessária.**\n"
-                f"4.  Se o usuário se despedir ou agradecer, responda cordialmente.\n"
-                f"5.  Se não entender, peça para reformular.\n"
+                f"    Substitua os placeholders `[Problema]`, `[Nome Contato]`, etc., pelos dados coletados.\n"
+                f"4.  **Comportamento:**\n"
+                f"    - Mantenha um tom profissional e útil.\n"
+                f"    - Seja conciso. Limite suas respostas a 3 frases, a menos que uma explicação mais completa seja solicitada ou necessária para o fluxo.\n"
+                f"    - Guie o usuário suavemente pelos fluxos de SDR ou Suporte, pedindo uma informação por vez.\n"
+                f"    - Se não entender, peça para o usuário reformular.\n"
+                f"    - Se o usuário se despedir ou agradecer, responda de forma cordial e encerre o tópico.\n"
                 f"---"
             )
 
-            # Prepara o histórico para o Gemini.
-            if not current_flow_state["history"]: 
-                gemini_chat_history = [
+            if not current_flow_state["history"]:
+                gemini_history = [
                     {"role": "user", "parts": [{"text": system_instruction}]},
                     {"role": "model", "parts": [{"text": "Entendido. Estou pronto para ajudar a Tralhotec. Como posso iniciar?"}]}
                 ]
             else:
-                gemini_chat_history = current_flow_state["history"]
+                gemini_history = current_flow_state["history"]
             
-            chat_session = self.gemini_model.start_chat(history=gemini_chat_history)
-            gemini_response = await chat_session.send_message(user_message) # <-- 'await' está presente e necessário aqui
+            chat_session = self.gemini_model.start_chat(history=gemini_history)
+            gemini_response = chat_session.send_message(user_message)
 
             if gemini_response and gemini_response.candidates:
                 response_content = gemini_response.candidates[0].content.parts[0].text
+                
+                print(f"DEBUG: Conteúdo bruto do Gemini: '{response_content}'") 
                 
                 response_text = response_content 
                 
                 json_start_tag = "```json"
                 json_end_tag = "```"
                 json_start_index = response_content.find(json_start_tag)
-                json_end_index = response_content.find(json_end_tag, json_start_index + len(json_start_tag)) if json_start_index != -1 else -1
+                json_end_index = -1
+
+                if json_start_index != -1:
+                    json_end_index = response_content.find(json_end_tag, json_start_index + len(json_start_tag))
+                
+                print(f"DEBUG: json_start_index: {json_start_index}, json_end_index: {json_end_index}")
 
                 if json_start_index != -1 and json_end_index != -1:
                     json_str = response_content[json_start_index + len(json_start_tag):json_end_index].strip()
+                    print(f"DEBUG: String JSON extraída: '{json_str}'")
                     try:
                         extracted_data = json.loads(json_str)
                         print(f"Artoriasbot: JSON extraído: {extracted_data}")
                         
-                        # Código de salvamento de dados temporariamente desativado
-                        # action_type = extracted_data.get("action", "unknown")
-                        # if action_type in ["sdr_completed", "support_escalated"]:
-                        #    pass 
+                        # --- CÓDIGO REMOVIDO: ENVIAR JSON PARA O N8N ---
+                        # N8N_WEBHOOK_URL = "http://host.docker.internal:5678/webhook-test/processar_lead" 
+                        # try:
+                        #     requests.post(N8N_WEBHOOK_URL, json=extracted_data)
+                        #     print(f"Artoriasbot: JSON enviado para o n8n com sucesso.")
+                        # except requests.exceptions.RequestException as req_err:
+                        #     print(f"Artoriasbot: ERRO ao enviar JSON para o n8n: {req_err}")
+                        # --- FIM DO CÓDIGO REMOVIDO ---
                         
                         response_text = response_content[:json_start_index].strip()
                         
+                        print(f"DEBUG: Resposta textual após remover JSON: '{response_text}'")
+
                         if not response_text:
+                            print(f"DEBUG: response_text está vazio. Tentando resposta padrão.")
                             action = extracted_data.get("action", "")
+                            print(f"DEBUG: Ação extraída do JSON: '{action}'")
+
                             if "sdr_completed" in action:
                                 response_text = "Perfeito! Agradeço as informações. Um dos nossos SDRs entrará em contato em breve para agendar uma conversa com um consultor de vendas."
                             elif "support_escalated" in action:
@@ -117,14 +119,16 @@ class Artoriasbot:
                             else:
                                 response_text = "Concluído! Agradeço as informações." 
 
+                        print(f"DEBUG: Resposta textual final: '{response_text}'")
+
                     except json.JSONDecodeError as e:
                         print(f"Artoriasbot: ERRO ao parsear JSON: {e}")
                         extracted_data = {} 
-                
-                # Salvamento de histórico apenas em memória
-                current_flow_state["history"].append({"role": "user", "parts": [{"text": user_message}]})
-                current_flow_state["history"].append({"role": "model", "parts": [{"text": response_text}]})
+                # --- FIM DA LÓGICA DE EXTRAÇÃO DE JSON ---
 
+                current_flow_state["history"] = [
+                    {"role": entry.role, "parts": [part.text for entry in chat_session.history for part in entry.parts if hasattr(part, 'text')]} # Corrigido o loop aninhado aqui
+                ]
             else:
                 response_text = "Não consegui gerar uma resposta inteligente no momento. Por favor, tente novamente."
 

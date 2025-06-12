@@ -2,8 +2,8 @@ from flask import Flask, request, jsonify
 import os
 from dotenv import load_dotenv
 import traceback
-import asyncio # <-- ESSENCIAL: Necessário para lidar com funções assíncronas
-from flask_cors import CORS 
+import asyncio 
+from flask_cors import CORS # <-- RE-ADICIONADO: Importa a extensão Flask-CORS
 
 # Importa o seu bot Artorias AI.
 from artoriasbot import Artoriasbot
@@ -12,7 +12,7 @@ from artoriasbot import Artoriasbot
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app) 
+CORS(app) # <-- RE-ADICIONADO: Inicializa CORS para a sua aplicação Flask
 
 # --- Inicialização do Artoriasbot ---
 try:
@@ -21,15 +21,17 @@ try:
 except Exception as e:
     print(f"ERRO CRÍTICO: Falha ao inicializar o Artoriasbot: {e}")
     traceback.print_exc()
-    exit(1) 
+    exit(1) # Sai do programa
 
 
-@app.route("/api/messages", methods=["POST"]) 
+@app.route("/api/messages", methods=["POST"]) # O Flask-CORS cuidará do OPTIONS, mas se quiser explicitar, pode adicionar "OPTIONS" aqui
 def messages():
     """
     Endpoint HTTP para receber mensagens do usuário.
     Espera um JSON com um campo 'text' (ou 'message'/'content', podemos padronizar).
     """
+    # Não precisa de if request.method == 'OPTIONS' explícito aqui, o Flask-CORS lida com isso automaticamente.
+
     if not request.is_json:
         return jsonify({"error": "Content-Type deve ser application/json"}), 415
 
@@ -42,17 +44,13 @@ def messages():
 
         print(f"Flask: Mensagem recebida do usuário: '{user_message}'")
 
-        # --- CHAMADA ASSÍNCRONA PARA O BOT ---
-        # ESSA É A CHAVE: Precisa de asyncio para aguardar BOT.process_message
         try:
-            # Obtém ou cria um loop de eventos para a thread atual
             try:
                 loop = asyncio.get_event_loop()
-            except RuntimeError: # Se não há um loop rodando na thread atual, cria um.
+            except RuntimeError: 
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
             
-            # Executa a função assíncrona process_message
             bot_response_text = loop.run_until_complete(BOT.process_message(user_message, user_id="test_user_123"))
             
         except Exception as e:

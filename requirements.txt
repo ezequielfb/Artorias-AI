@@ -3,5 +3,3 @@ gunicorn
 python-dotenv
 google-generativeai
 Flask-Cors
-requests
-asyncio
