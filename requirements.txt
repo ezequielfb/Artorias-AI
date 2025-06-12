@@ -2,4 +2,5 @@ Flask
 gunicorn
 python-dotenv
 google-generativeai
-Flask-Cors # <-- RE-ADICIONADO
+Flask-Cors
+asyncpg
