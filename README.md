@@ -32,7 +32,7 @@ Certifique-se de ter instalado:
     ```
     **se você fez um fork para sua conta do GitHub:**
     ```bash
-       substitua SEU_USUARIO pelo seu nome de usuário:
+       #substitua SEU_USUARIO pelo seu nome de usuário do Github:
        git clone https://github.com/SEU_USUARIO/Artorias-AI.git
        cd Artorias-AI
     ```
