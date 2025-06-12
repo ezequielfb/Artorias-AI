@@ -3,11 +3,14 @@ import traceback
 import google.generativeai as genai
 import os
 import json
-# import requests # <-- Removido: Não é mais necessário
+import asyncpg # <-- Adicionado: Importa o driver assíncrono para PostgreSQL
 
 class Artoriasbot:
     def __init__(self):
+        # O dicionário conversation_states agora será usado como um cache temporário,
+        # mas o estado real será salvo e carregado do banco de dados.
         self.conversation_states = {} 
+        self.db_pool = None # Pool de conexões com o banco de dados
 
         gemini_api_key = os.environ.get("GEMINI_API_KEY")
         if not gemini_api_key:
@@ -17,16 +20,89 @@ class Artoriasbot:
         self.gemini_model = genai.GenerativeModel('gemini-2.0-flash') 
         print("Artoriasbot: Modelo Gemini inicializado com sucesso.")
 
+        # O pool de conexões será inicializado na primeira vez que for necessário,
+        # dentro dos métodos de acesso ao BD.
+
+    async def _init_db_pool(self):
+        """Inicializa o pool de conexões com o banco de dados."""
+        if self.db_pool is None:
+            db_url = os.environ.get("DATABASE_URL")
+            if not db_url:
+                raise ValueError("DATABASE_URL não configurada nas variáveis de ambiente.")
+            
+            # Cria um pool de conexões. Isso é mais eficiente do que abrir e fechar conexões para cada requisição.
+            self.db_pool = await asyncpg.create_pool(db_url)
+            print("Artoriasbot: Pool de conexões com o banco de dados inicializado com sucesso.")
+
+    async def _load_conversation_history(self, user_id: str) -> list:
+        """Carrega o histórico de conversas de um usuário do banco de dados."""
+        await self._init_db_pool() # Garante que o pool está inicializado
+        async with self.db_pool.acquire() as conn:
+            # Query para buscar histórico de conversas.
+            # Ordenado por timestamp para garantir a ordem correta.
+            # Assumimos que a tabela 'conversation_history' existe e tem colunas 'user_id', 'role', 'content', 'timestamp'.
+            history_records = await conn.fetch(
+                """
+                SELECT role, content
+                FROM conversation_history
+                WHERE user_id = $1
+                ORDER BY timestamp;
+                """,
+                user_id
+            )
+            # Converte os registros do banco de dados para o formato esperado pelo Gemini
+            # 'parts' é uma lista de objetos, aqui simplificamos para apenas o texto.
+            history = [{"role": r['role'], "parts": [{"text": r['content']}]} for r in history_records]
+            print(f"Artoriasbot: Histórico carregado para '{user_id}': {len(history)} entradas.")
+            return history
+
+    async def _save_conversation_entry(self, user_id: str, role: str, content: str):
+        """Salva uma entrada de conversa no histórico do banco de dados."""
+        await self._init_db_pool() # Garante que o pool está inicializado
+        async with self.db_pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO conversation_history (user_id, role, content, timestamp)
+                VALUES ($1, $2, $3, NOW());
+                """,
+                user_id, role, content
+            )
+            # print(f"Artoriasbot: Entrada de conversa salva para '{user_id}' (role: {role}).") # Comentado para evitar logs muito longos
+
+    async def _save_extracted_data(self, user_id: str, data: dict, action_type: str):
+        """Salva os dados estruturados extraídos (SDR/Suporte) no banco de dados."""
+        await self._init_db_pool() # Garante que o pool está inicializado
+        async with self.db_pool.acquire() as conn:
+            # Assumimos que a tabela 'extracted_leads_tickets' existe.
+            # Colunas: user_id, action_type, data_json (jsonb), timestamp.
+            await conn.execute(
+                """
+                INSERT INTO extracted_leads_tickets (user_id, action_type, data_json, timestamp)
+                VALUES ($1, $2, $3::jsonb, NOW());
+                """,
+                user_id, action_type, json.dumps(data) # Salva o dicionário Python como JSONB no Postgre
+            )
+            print(f"Artoriasbot: Dados extraídos de '{action_type}' salvos para '{user_id}'.")
+
     async def process_message(self, user_message: str, user_id: str = "default_user") -> str:
         print(f"Artoriasbot: Processando mensagem de '{user_id}': '{user_message}'")
 
-        current_flow_state = self.conversation_states.get(user_id, {"state": "initial", "history": []})
+        # --- NOVA LÓGICA: CARREGAR HISTÓRICO DO BANCO DE DADOS ---
+        # Tenta carregar o histórico do banco de dados primeiro.
+        try:
+            gemini_history = await self._load_conversation_history(user_id)
+            current_flow_state = {"state": "initial", "history": gemini_history}
+        except Exception as e:
+            print(f"ERRO: Falha ao carregar histórico do BD para '{user_id}': {e}. Iniciando com histórico vazio.")
+            traceback.print_exc(file=sys.stdout)
+            gemini_history = []
+            current_flow_state = {"state": "initial", "history": []}
+        # --- FIM DA NOVA LÓGICA ---
         
         response_text = "Desculpe, não consegui processar sua requisição no momento. Tente novamente."
-        extracted_data = {} # Dicionário para armazenar dados extraídos
+        extracted_data = {} 
 
         try:
-            # INSTRUÇÕES DO SISTEMA (PROMPT) - MANTIDAS COMO ESTÃO
             system_instruction = (
                 f"Você é Artorias AI, um assistente inteligente para a Tralhotec, uma empresa de soluções de TI.\n"
                 f"Suas responsabilidades são:\n"
@@ -36,7 +112,7 @@ class Artoriasbot:
                 f"    b. Nome da empresa.\n"
                 f"    c. Principais desafios/necessidades.\n"
                 f"    d. Tamanho da empresa (Ex: até 10, 11-50, 50+).\n"
-                f"    e. **E-mail de contato e/ou número de WhatsApp** (último passo da qualificação SDR).\n"
+                f"    e. E-mail de contato e/ou número de WhatsApp (último passo da qualificação SDR).\n"
                 f"    Ao final do fluxo SDR (todas as informações serem coletadas), forneça a resposta de texto final para o usuário e, em uma nova linha, **então adicione o bloco JSON**.\n"
                 f"    ```json\n"
                 f"    {{\"action\": \"sdr_completed\", \"lead_info\": {{\"nome\": \"[Nome]\", \"funcao\": \"[Funcao]\", \"empresa\": \"[Empresa]\", \"desafios\": \"[Desafios]\", \"tamanho\": \"[Tamanho]\", \"email\": \"[Email]\", \"whatsapp\": \"[WhatsApp]\"}}}}\n"
@@ -59,13 +135,13 @@ class Artoriasbot:
                 f"---"
             )
 
-            if not current_flow_state["history"]:
-                gemini_history = [
-                    {"role": "user", "parts": [{"text": system_instruction}]},
-                    {"role": "model", "parts": [{"text": "Entendido. Estou pronto para ajudar a Tralhotec. Como posso iniciar?"}]}
-                ]
-            else:
-                gemini_history = current_flow_state["history"]
+            # --- NOVA LÓGICA: ADICIONA A INSTRUÇÃO AO HISTÓRICO APENAS NO PRIMEIRO TURNO ---
+            # O sistema instruction deve ser a primeira entrada do histórico para o Gemini.
+            # Se for a primeira vez que conversamos (histórico do BD vazio), adicione a instrução.
+            if not gemini_history: # Verifica se o histórico carregado do BD está vazio
+                gemini_history.append({"role": "user", "parts": [{"text": system_instruction}]})
+                gemini_history.append({"role": "model", "parts": [{"text": "Entendido. Estou pronto para ajudar a Tralhotec. Como posso iniciar?"}]})
+            # --- FIM DA NOVA LÓGICA ---
             
             chat_session = self.gemini_model.start_chat(history=gemini_history)
             gemini_response = chat_session.send_message(user_message)
@@ -94,14 +170,11 @@ class Artoriasbot:
                         extracted_data = json.loads(json_str)
                         print(f"Artoriasbot: JSON extraído: {extracted_data}")
                         
-                        # --- CÓDIGO REMOVIDO: ENVIAR JSON PARA O N8N ---
-                        # N8N_WEBHOOK_URL = "http://host.docker.internal:5678/webhook-test/processar_lead" 
-                        # try:
-                        #     requests.post(N8N_WEBHOOK_URL, json=extracted_data)
-                        #     print(f"Artoriasbot: JSON enviado para o n8n com sucesso.")
-                        # except requests.exceptions.RequestException as req_err:
-                        #     print(f"Artoriasbot: ERRO ao enviar JSON para o n8n: {req_err}")
-                        # --- FIM DO CÓDIGO REMOVIDO ---
+                        # --- NOVA LÓGICA: SALVAR DADOS EXTRAÍDOS NO BANCO DE DADOS ---
+                        action_type = extracted_data.get("action", "unknown")
+                        if action_type in ["sdr_completed", "support_escalated"]:
+                            await self._save_extracted_data(user_id, extracted_data, action_type)
+                        # --- FIM DA NOVA LÓGICA ---
                         
                         response_text = response_content[:json_start_index].strip()
                         
@@ -126,8 +199,18 @@ class Artoriasbot:
                         extracted_data = {} 
                 # --- FIM DA LÓGICA DE EXTRAÇÃO DE JSON ---
 
+                # --- NOVA LÓGICA: SALVAR CADA TURNO DA CONVERSA NO BANCO DE DADOS ---
+                # Salva a mensagem do usuário
+                await self._save_conversation_entry(user_id, "user", user_message)
+                # Salva a resposta do Gemini (texto)
+                await self._save_conversation_entry(user_id, "model", response_text)
+
+                # Atualiza nosso histórico local com o histórico da sessão do Gemini.
+                # A sessão do Gemini já foi atualizada pelo chat_session.send_message.
+                # Apenas sincronizamos nosso estado local com o que o Gemini tem.
                 current_flow_state["history"] = [
- {"role": entry.role, "parts": [part.text for part in entry.parts if hasattr(part, 'text')]} for entry in chat_session.history
+                    {"role": entry.role, "parts": [part.text for part in entry.parts if hasattr(part, 'text')]}
+                    for entry in chat_session.history
                 ]
             else:
                 response_text = "Não consegui gerar uma resposta inteligente no momento. Por favor, tente novamente."

@@ -3,7 +3,7 @@ import os
 from dotenv import load_dotenv
 import traceback
 import asyncio 
-from flask_cors import CORS # <-- RE-ADICIONADO: Importa a extensão Flask-CORS
+# from flask_cors import CORS # <-- Removido: Não é mais necessário
 
 # Importa o seu bot Artorias AI.
 from artoriasbot import Artoriasbot
@@ -12,7 +12,7 @@ from artoriasbot import Artoriasbot
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app) # <-- RE-ADICIONADO: Inicializa CORS para a sua aplicação Flask
+# CORS(app) # <-- Removido: Não é mais necessário
 
 # --- Inicialização do Artoriasbot ---
 try:
@@ -24,13 +24,15 @@ except Exception as e:
     exit(1) # Sai do programa
 
 
-@app.route("/api/messages", methods=["POST"]) # O Flask-CORS cuidará do OPTIONS, mas se quiser explicitar, pode adicionar "OPTIONS" aqui
+@app.route("/api/messages", methods=["POST"]) # <-- Removido "OPTIONS"
 def messages():
     """
     Endpoint HTTP para receber mensagens do usuário.
     Espera um JSON com um campo 'text' (ou 'message'/'content', podemos padronizar).
     """
-    # Não precisa de if request.method == 'OPTIONS' explícito aqui, o Flask-CORS lida com isso automaticamente.
+    # Removida a lógica do OPTIONS, pois Flask-CORS não será usado
+    # if request.method == 'OPTIONS':
+    #     return '', 200 
 
     if not request.is_json:
         return jsonify({"error": "Content-Type deve ser application/json"}), 415
