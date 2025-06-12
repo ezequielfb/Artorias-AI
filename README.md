@@ -1,8 +1,8 @@
-# Artorias AI - Agente Inteligente para Atendimento e SDR
+# Artorias AI - Agente para Atendimento e SDR
 
 ## Visão Geral
 
-O **Artorias AI** é um protótipo de agente conversacional desenvolvido em Python com Flask, utilizando a avançada API do Google Gemini como seu "cérebro" de inteligência artificial. Ele é projetado para atuar em duas frentes principais:
+O **Artorias AI** é um protótipo de agente conversacional desenvolvido em Python com Flask, utilizando a API do Google Gemini como seu "cérebro" de inteligência artificial. Ele é projetado para atuar em duas frentes principais:
 
 1.  **Atendimento Inteligente (FAQ):** Responde a perguntas frequentes sobre produtos, serviços e processos da empresa.
 2.  **Qualificação de SDR (Sales Development Representative):** Conduz conversas para coletar informações essenciais de leads (nome, função, empresa, desafios, tamanho), qualificando-os para o time de vendas.
@@ -15,14 +15,6 @@ Atualmente em fase de desenvolvimento e teste local, com integração funcional 
 
 ## Tecnologias Utilizadas
 
-* **Python 3.x:** Linguagem de programação principal.
-* **Flask:** Microframework web para criar o endpoint HTTP do bot.
-* **Google Gemini API:** Modelo de linguagem grande (LLM) para NLU (Natural Language Understanding), geração de texto e gerenciamento de conversas.
-* **python-dotenv:** Para gerenciamento seguro de variáveis de ambiente.
-* **Git & GitHub:** Controle de versão e hospedagem do código.
-* **Docker (futuramente):** Para conteinerização e deploy consistente.
-* **n8n (futuramente):** Para automação de fluxos de trabalho (envio de e-mails, integração com CRMs, etc.).
-
 ## Como Rodar Localmente
 
 ### Pré-requisitos
@@ -31,17 +23,19 @@ Certifique-se de ter instalado:
 
 * **Python 3.9+** (Verifique sua versão com `python --version`)
 * **Git**
-* **Docker Desktop** (necessário para rodar o n8n localmente, e futuramente para conteinerizar o bot)
 * Uma **Chave de API do Google Gemini**: Obtenha-a no [Google AI Studio](https://aistudio.google.com/apikeys).
 
 ### Configuração
 
 1.  **Clone este repositório:**
     ```bash
-    git clone [https://github.com/SEU_USUARIO/Artorias-AI.git](https://github.com/SEU_USUARIO/Artorias-AI.git)
-    cd Artorias-AI
+       git clone https://github.com/ezequielfb/Artorias-AI.git
+       cd Artorias-AI
     ```
-    *(Substitua `SEU_USUARIO` pelo seu nome de usuário no GitHub)*
+       Se você fez um fork para sua conta do GitHub,
+       substitua SEU_USUARIO pelo seu nome de usuário:
+        git clone https://github.com/SEU_USUARIO/Artorias-AI.git
+        cd Artorias-AI
 
 2.  **Crie e ative um ambiente virtual:**
     ```bash
