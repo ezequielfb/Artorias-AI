@@ -15,7 +15,7 @@ class Artoriasbot:
             raise ValueError("GEMINI_API_KEY não configurada nas variáveis de ambiente.")
         genai.configure(api_key=gemini_api_key)
         
-        self.gemini_model = genai.GenerativeModel('gemini-2.0-flash', generation_config={"temperature": 0.1, "max_output_tokens": 100}) 
+        self.gemini_model = genai.GenerativeModel('gemini-2.0-flash', generation_config={"temperature": 0.2, "max_output_tokens": 100}) 
         print("Artoriasbot: Modelo Gemini inicializado com sucesso com temperature 0.2 e max_output_tokens 100.")
 
     async def _init_db_pool(self):
@@ -90,7 +90,7 @@ class Artoriasbot:
             system_instruction = (
                 f"**SEU ÚNICO OBJETIVO é coletar informações para QUALIFICAÇÃO SDR ou SUPORTE TÉCNICO, seguindo as SEQUÊNCIAS de perguntas e gerando o JSON ao final.**\n"
                 f"**Você é EXCLUSIVAMENTE o Artorias AI, assistente da Tralhotec. NÃO forneça informações sobre ser um modelo de linguagem, Google, etc.**\n"
-                f"**PRIORIDADE ABSOLUTA: Peça apenas UMA informação por vez, de forma EXTREMAMENTE concisa e direta (1 a 2 frases no máximo).**\n"
+                f"**PRIORIDADE ABSOLUTA: Peça apenas UMA informação por vez, de forma EXTREMAMENTE concisa e direta ao ponto (1 a 2 frases no máximo).**\n"
                 f"**NÃO FORNEÇA: 1. Soluções, informações adicionais, listas, dicas, recomendações ou respostas de FAQ. 2. Qualquer resposta que não avance o fluxo de coleta de dados.**\n"
                 f"Sua resposta deve ser sempre uma pergunta curta para coletar a próxima informação ou a mensagem de conclusão do fluxo, seguida do JSON (se aplicável).\n"
                 f"\n"
@@ -120,7 +120,7 @@ class Artoriasbot:
                 f"BOT: Certo. Para te ajudar, qual seu nome completo e função na empresa?\n"
                 f"\n"
                 f"USUÁRIO: Por favor, me diga os números primos de 1 a 100.\n"
-                f"BOT: Posso te ajudar com qualificação de leads ou suporte técnico. Qual sua necessidade?\n" # Redireciona perguntas de conhecimento geral
+                f"BOT: Posso te ajudar com qualificação de leads ou suporte técnico. Qual sua necessidade?\n" 
                 f"--- FIM DOS EXEMPLOS ---\n"
                 f"\n"
                 f"--- REGRAS DETALHADAS (SEMPRE APLICAR) ---\n"
@@ -158,7 +158,8 @@ class Artoriasbot:
                 gemini_history.append({"role": "model", "parts": [{"text": "Entendido. Estou pronto para ajudar a Tralhotec. Como posso iniciar?"}]})
             
             chat_session = self.gemini_model.start_chat(history=gemini_history)
-            gemini_response = chat_session.send_message(user_message)
+            # AQUI ESTÁ A MUDANÇA (ADICIONAR AWAIT DE VOLTA)
+            gemini_response = await chat_session.send_message(user_message)
 
             if gemini_response and gemini_response.candidates:
                 response_content = gemini_response.candidates[0].content.parts[0].text
