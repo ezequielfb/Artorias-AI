@@ -2,7 +2,7 @@ from flask import Flask, request, jsonify
 import os
 from dotenv import load_dotenv
 import traceback
-import asyncio # <-- RE-ADICIONADO: Necessário para lidar com funções assíncronas
+import asyncio # <-- ESSENCIAL: Necessário para lidar com funções assíncronas
 from flask_cors import CORS 
 
 # Importa o seu bot Artorias AI.
@@ -43,12 +43,12 @@ def messages():
         print(f"Flask: Mensagem recebida do usuário: '{user_message}'")
 
         # --- CHAMADA ASSÍNCRONA PARA O BOT ---
-        # Precisamos de asyncio para aguardar BOT.process_message
+        # ESSA É A CHAVE: Precisa de asyncio para aguardar BOT.process_message
         try:
             # Obtém ou cria um loop de eventos para a thread atual
             try:
                 loop = asyncio.get_event_loop()
-            except RuntimeError:
+            except RuntimeError: # Se não há um loop rodando na thread atual, cria um.
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
             
