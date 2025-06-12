@@ -74,19 +74,20 @@ class Artoriasbot:
         print(f"Artoriasbot: Processando mensagem de '{user_id}': '{user_message}'")
 
         try:
-            gemini_history = await self._load_conversation_history(user_id)
-            current_flow_state = {"state": "initial", "history": gemini_history}
+            # Carrega o histórico do banco de dados
+            db_history = await self._load_conversation_history(user_id)
+            current_flow_state = {"state": "initial", "history": db_history}
         except Exception as e:
             print(f"ERRO: Falha ao carregar histórico do BD para '{user_id}': {e}. Iniciando com histórico vazio.")
             traceback.print_exc(file=sys.stdout)
-            gemini_history = []
+            db_history = []
             current_flow_state = {"state": "initial", "history": []}
         
         response_text = "Desculpe, não consegui processar sua requisição no momento. Tente novamente."
         extracted_data = {} 
 
         try:
-            # INSTRUÇÕES ATUALIZADAS COM FEW-SHOT EXAMPLES E RIGIDEZ MÁXIMA
+            # PROMPT ULTIMATE (Máxima Restrição e Força na Persona/Fluxo) - VERSÃO FINAL REVISADA
             system_instruction = (
                 f"**SEU ÚNICO OBJETIVO é coletar informações para QUALIFICAÇÃO SDR ou SUPORTE TÉCNICO, seguindo as SEQUÊNCIAS de perguntas e gerando o JSON ao final.**\n"
                 f"**Você é EXCLUSIVAMENTE o Artorias AI, assistente da Tralhotec. NÃO forneça informações sobre ser um modelo de linguagem, Google, etc.**\n"
@@ -153,11 +154,21 @@ class Artoriasbot:
                 f"---"
             )
 
-            if not gemini_history: 
-                gemini_history.append({"role": "user", "parts": [{"text": system_instruction}]})
-                gemini_history.append({"role": "model", "parts": [{"text": "Entendido. Estou pronto para ajudar a Tralhotec. Como posso iniciar?"}]})
+            # Prepara o histórico para o Gemini. A primeira entrada é sempre a system_instruction.
+            # Se o histórico do BD estiver vazio, adicione a instrução do sistema e uma resposta inicial do bot.
+            if not db_history: 
+                gemini_chat_history = [
+                    {"role": "user", "parts": [{"text": system_instruction}]},
+                    {"role": "model", "parts": [{"text": "Entendido. Estou pronto para ajudar a Tralhotec. Como posso iniciar?"}]}
+                ]
+            else:
+                # Se há histórico do BD, adicione a system_instruction ANTES do histórico salvo.
+                # Isso reforça as regras em cada nova interação sem poluir o histórico do DB.
+                # Nota: A API do Gemini pode ter um token limit para o histórico.
+                # Longos históricos podem ser truncados ou causar lentidão.
+                gemini_chat_history = [{"role": "user", "parts": [{"text": system_instruction}]}] + db_history
             
-            chat_session = self.gemini_model.start_chat(history=gemini_history)
+            chat_session = self.gemini_model.start_chat(history=gemini_chat_history)
             gemini_response = await chat_session.send_message(user_message) # <-- CORRIGIDO: Adicionado 'await'
 
             if gemini_response and gemini_response.candidates:
@@ -208,9 +219,15 @@ class Artoriasbot:
                         print(f"Artoriasbot: ERRO ao parsear JSON: {e}")
                         extracted_data = {} 
                 
+                # Salva a mensagem do usuário
                 await self._save_conversation_entry(user_id, "user", user_message)
+                # Salva a resposta do Gemini (texto)
                 await self._save_conversation_entry(user_id, "model", response_text)
 
+                # current_flow_state["history"] será atualizado internamente pelo chat_session
+                # e também é preenchido pelo load_conversation_history do DB no início do turno.
+                # Não precisamos atualizar explicitamente aqui se o DB é a fonte primária.
+                # Apenas para fins de consistência interna, podemos manter se quisermos.
                 current_flow_state["history"] = [
                     {"role": entry.role, "parts": [part.text for part in entry.parts if hasattr(part, 'text')]}
                     for entry in chat_session.history
