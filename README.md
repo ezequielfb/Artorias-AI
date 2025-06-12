@@ -30,7 +30,7 @@ Certifique-se de ter instalado:
        git clone https://github.com/ezequielfb/Artorias-AI.git
        cd Artorias-AI
     ```
-       Se você fez um fork para sua conta do GitHub,
+    ```se você fez um fork para sua conta do GitHub,
        substitua SEU_USUARIO pelo seu nome de usuário:
         git clone https://github.com/SEU_USUARIO/Artorias-AI.git
         cd Artorias-AI
