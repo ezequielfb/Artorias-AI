@@ -2,8 +2,8 @@ from flask import Flask, request, jsonify
 import os
 from dotenv import load_dotenv
 import traceback
-import asyncio 
-from flask_cors import CORS # <-- RE-ADICIONADO: Importa a extensão Flask-CORS
+# import asyncio # <-- REMOVIDO (não precisaremos mais de um loop assíncrono aqui)
+from flask_cors import CORS 
 
 # Importa o seu bot Artorias AI.
 from artoriasbot import Artoriasbot
@@ -12,7 +12,7 @@ from artoriasbot import Artoriasbot
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app) # <-- RE-ADICIONADO: Inicializa CORS para a sua aplicação Flask
+CORS(app) 
 
 # --- Inicialização do Artoriasbot ---
 try:
@@ -21,17 +21,15 @@ try:
 except Exception as e:
     print(f"ERRO CRÍTICO: Falha ao inicializar o Artoriasbot: {e}")
     traceback.print_exc()
-    exit(1) # Sai do programa
+    exit(1) 
 
 
-@app.route("/api/messages", methods=["POST"]) # O Flask-CORS cuidará do OPTIONS, mas se quiser explicitar, pode adicionar "OPTIONS" aqui
+@app.route("/api/messages", methods=["POST"]) 
 def messages():
     """
     Endpoint HTTP para receber mensagens do usuário.
     Espera um JSON com um campo 'text' (ou 'message'/'content', podemos padronizar).
     """
-    # Não precisa de if request.method == 'OPTIONS' explícito aqui, o Flask-CORS lida com isso automaticamente.
-
     if not request.is_json:
         return jsonify({"error": "Content-Type deve ser application/json"}), 415
 
@@ -44,20 +42,11 @@ def messages():
 
         print(f"Flask: Mensagem recebida do usuário: '{user_message}'")
 
-        try:
-            try:
-                loop = asyncio.get_event_loop()
-            except RuntimeError: 
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
+        # --- CHAMADA SÍNCRONA PARA O BOT ---
+        # Não precisa de loop asyncio aqui, pois BOT.process_message agora é síncrono.
+        bot_response_text = BOT.process_message(user_message, user_id="test_user_123") 
+        # --- FIM DA CHAMADA SÍNCRONA ---
             
-            bot_response_text = loop.run_until_complete(BOT.process_message(user_message, user_id="test_user_123"))
-            
-        except Exception as e:
-            print(f"ERRO: Falha ao processar a requisição no loop assíncrono: {e}")
-            traceback.print_exc()
-            return jsonify({"error": "Erro interno do servidor ao processar a mensagem."}), 500
-
         print(f"Flask: Resposta do bot: '{bot_response_text}'")
         return jsonify({"response": bot_response_text}), 200
 

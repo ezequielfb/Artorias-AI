@@ -3,12 +3,15 @@ import traceback
 import google.generativeai as genai
 import os
 import json
-import asyncpg
+import requests # <-- RE-ADICIONADO: Para requisições síncronas
+# import asyncpg # <-- REMOVIDO: Não usaremos mais o driver assíncrono
 
 class Artoriasbot:
     def __init__(self):
-        self.conversation_states = {} 
-        self.db_pool = None 
+        # A lógica de persistência de BD será temporariamente removida
+        # para focar em resolver o problema do Gemini.
+        self.conversation_states = {} # Dicionário em memória apenas
+        # self.db_pool = None # Removido, pois não há BD assíncrono
 
         gemini_api_key = os.environ.get("GEMINI_API_KEY")
         if not gemini_api_key:
@@ -18,70 +21,18 @@ class Artoriasbot:
         self.gemini_model = genai.GenerativeModel('gemini-2.0-flash', generation_config={"temperature": 0.2, "max_output_tokens": 100}) 
         print("Artoriasbot: Modelo Gemini inicializado com sucesso com temperature 0.2 e max_output_tokens 100.")
 
-    async def _init_db_pool(self):
-        """Inicializa o pool de conexões com o banco de dados."""
-        if self.db_pool is None:
-            db_url = os.environ.get("DATABASE_URL")
-            if not db_url:
-                raise ValueError("DATABASE_URL não configurada nas variáveis de ambiente.")
-            
-            self.db_pool = await asyncpg.create_pool(db_url)
-            print("Artoriasbot: Pool de conexões com o banco de dados inicializado com sucesso.")
+    # Métodos de BD temporariamente removidos, pois a chamada do Gemini agora é síncrona.
+    # Se a persistência for reintroduzida, será com uma abordagem síncrona ou em um contexto diferente.
+    # async def _init_db_pool(self): ...
+    # async def _load_conversation_history(self, user_id: str) -> list: ...
+    # async def _save_conversation_entry(self, user_id: str, role: str, content: str): ...
+    # async def _save_extracted_data(self, user_id: str, data: dict, action_type: str): ...
 
-    async def _load_conversation_history(self, user_id: str) -> list:
-        """Carrega o histórico de conversas de um usuário do banco de dados."""
-        await self._init_db_pool() 
-        async with self.db_pool.acquire() as conn:
-            history_records = await conn.fetch(
-                """
-                SELECT role, content
-                FROM conversation_history
-                WHERE user_id = $1
-                ORDER BY timestamp;
-                """,
-                user_id
-            )
-            history = [{"role": r['role'], "parts": [{"text": r['content']}]} for r in history_records]
-            print(f"Artoriasbot: Histórico carregado para '{user_id}': {len(history)} entradas.")
-            return history
-
-    async def _save_conversation_entry(self, user_id: str, role: str, content: str):
-        """Salva uma entrada de conversa no histórico do banco de dados."""
-        await self._init_db_pool() 
-        async with self.db_pool.acquire() as conn:
-            await conn.execute(
-                """
-                INSERT INTO conversation_history (user_id, role, content, timestamp)
-                VALUES ($1, $2, $3, NOW());
-                """,
-                user_id, role, content
-            )
-
-    async def _save_extracted_data(self, user_id: str, data: dict, action_type: str):
-        """Salva os dados estruturados extraídos (SDR/Suporte) no banco de dados."""
-        await self._init_db_pool() 
-        async with self.db_pool.acquire() as conn:
-            await conn.execute(
-                """
-                INSERT INTO extracted_leads_tickets (user_id, action_type, data_json, timestamp)
-                VALUES ($1, $2, $3::jsonb, NOW());
-                """,
-                user_id, action_type, json.dumps(data) 
-            )
-            print(f"Artoriasbot: Dados extraídos de '{action_type}' salvos para '{user_id}'.")
-
-    async def process_message(self, user_message: str, user_id: str = "default_user") -> str:
+    def process_message(self, user_message: str, user_id: str = "default_user") -> str: # <-- AGORA SÍNCRONO (sem 'async')
         print(f"Artoriasbot: Processando mensagem de '{user_id}': '{user_message}'")
 
-        try:
-            # Carrega o histórico do banco de dados
-            db_history = await self._load_conversation_history(user_id)
-            current_flow_state = {"state": "initial", "history": db_history}
-        except Exception as e:
-            print(f"ERRO: Falha ao carregar histórico do BD para '{user_id}': {e}. Iniciando com histórico vazio.")
-            traceback.print_exc(file=sys.stdout)
-            db_history = []
-            current_flow_state = {"state": "initial", "history": []}
+        # Histórico em memória apenas para este teste
+        current_flow_state = self.conversation_states.get(user_id, {"state": "initial", "history": []})
         
         response_text = "Desculpe, não consegui processar sua requisição no momento. Tente novamente."
         extracted_data = {} 
@@ -149,27 +100,30 @@ class Artoriasbot:
                 f"3.  **COMPORTAMENTO GERAL (SEMPRE APLICAR):**\n"
                 f"    - Mantenha tom profissional e útil, mas **SUA ÚNICA META é coletar dados e gerar JSON.**\n"
                 f"    - **Se o usuário desviar do fluxo ou perguntar algo não relacionado, IGNORE a pergunta desviada e REAFIRME a necessidade da próxima informação pendente.**\n"
-                f"    - Se não entender, peça para reformular.\n"
                 f"    - Se usuário se despedir/agradecer, responda de forma cordial e encerre o tópico (máximo 1 frase).\n"
                 f"---"
             )
 
             # Prepara o histórico para o Gemini. A primeira entrada é sempre a system_instruction.
             # Se o histórico do BD estiver vazio, adicione a instrução do sistema e uma resposta inicial do bot.
-            if not db_history: 
-                gemini_chat_history = [
+            if not current_flow_state["history"]: 
+                chat_history_for_gemini = [
                     {"role": "user", "parts": [{"text": system_instruction}]},
                     {"role": "model", "parts": [{"text": "Entendido. Estou pronto para ajudar a Tralhotec. Como posso iniciar?"}]}
                 ]
             else:
                 # Se há histórico do BD, adicione a system_instruction ANTES do histórico salvo.
                 # Isso reforça as regras em cada nova interação sem poluir o histórico do DB.
-                # Nota: A API do Gemini pode ter um token limit para o histórico.
-                # Longos históricos podem ser truncados ou causar lentidão.
-                gemini_chat_history = [{"role": "user", "parts": [{"text": system_instruction}]}] + db_history
-            
-            chat_session = self.gemini_model.start_chat(history=gemini_chat_history)
-            gemini_response = await chat_session.send_message(user_message) # <-- CORRIGIDO: Adicionado 'await'
+                chat_history_for_gemini = [{"role": "user", "parts": [{"text": system_instruction}]}] + current_flow_state["history"]
+
+            # Adiciona a mensagem atual do usuário ao histórico para esta chamada
+            chat_history_for_gemini.append({"role": "user", "parts": [{"text": user_message}]})
+
+            # --- CHAMADA SÍNCRONA PARA O GEMINI ---
+            # Usando generate_content diretamente, que pode ser feito de forma síncrona.
+            # Isso evita os problemas de 'await' com chat_session.send_message.
+            gemini_response = self.gemini_model.generate_content(chat_history_for_gemini) 
+            # --- FIM DA CHAMADA SÍNCRONA ---
 
             if gemini_response and gemini_response.candidates:
                 response_content = gemini_response.candidates[0].content.parts[0].text
@@ -181,11 +135,8 @@ class Artoriasbot:
                 json_start_tag = "```json"
                 json_end_tag = "```"
                 json_start_index = response_content.find(json_start_tag)
-                json_end_index = -1
+                json_end_index = response_content.find(json_end_tag, json_start_index + len(json_start_tag)) if json_start_index != -1 else -1
 
-                if json_start_index != -1:
-                    json_end_index = response_content.find(json_end_tag, json_start_index + len(json_start_tag))
-                
                 print(f"DEBUG: json_start_index: {json_start_index}, json_end_index: {json_end_index}")
 
                 if json_start_index != -1 and json_end_index != -1:
@@ -197,7 +148,8 @@ class Artoriasbot:
                         
                         action_type = extracted_data.get("action", "unknown")
                         if action_type in ["sdr_completed", "support_escalated"]:
-                            await self._save_extracted_data(user_id, extracted_data, action_type)
+                            # Ações de salvar no BD serão temporariamente desativadas/adaptadas
+                            pass # Temporariamente desativado para testar o Gemini
                         
                         response_text = response_content[:json_start_index].strip()
                         
@@ -219,19 +171,10 @@ class Artoriasbot:
                         print(f"Artoriasbot: ERRO ao parsear JSON: {e}")
                         extracted_data = {} 
                 
-                # Salva a mensagem do usuário
-                await self._save_conversation_entry(user_id, "user", user_message)
-                # Salva a resposta do Gemini (texto)
-                await self._save_conversation_entry(user_id, "model", response_text)
+                # Salvamento de histórico em memória apenas
+                current_flow_state["history"].append({"role": "user", "parts": [{"text": user_message}]})
+                current_flow_state["history"].append({"role": "model", "parts": [{"text": response_text}]})
 
-                # current_flow_state["history"] será atualizado internamente pelo chat_session
-                # e também é preenchido pelo load_conversation_history do DB no início do turno.
-                # Não precisamos atualizar explicitamente aqui se o DB é a fonte primária.
-                # Apenas para fins de consistência interna, podemos manter se quisermos.
-                current_flow_state["history"] = [
-                    {"role": entry.role, "parts": [part.text for part in entry.parts if hasattr(part, 'text')]}
-                    for entry in chat_session.history
-                ]
             else:
                 response_text = "Não consegui gerar uma resposta inteligente no momento. Por favor, tente novamente."
 
