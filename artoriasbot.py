@@ -3,33 +3,24 @@ import traceback
 import google.generativeai as genai
 import os
 import json
-import requests # <-- Necessário para chamadas HTTP síncronas
+import requests
 
 class Artoriasbot:
     def __init__(self):
-        self.conversation_states = {} # Histórico em memória apenas
+        self.conversation_states = {} 
 
         gemini_api_key = os.environ.get("GEMINI_API_KEY")
         if not gemini_api_key:
             raise ValueError("GEMINI_API_KEY não configurada nas variáveis de ambiente.")
-        genai.configure(api_key=gemini_api_key) # Apenas configura a chave globalmente
-
-        # Usaremos o nome do modelo e a API key para a chamada requests direta
-        self.gemini_model_name = 'gemini-2.0-flash' 
-        self.gemini_api_key = gemini_api_key # Armazenar a chave para usar na chamada requests
+        genai.configure(api_key=gemini_api_key)
         
-        # Ajustando parâmetros de geração para serem passados na payload da requisição requests
-        self.generation_config = {"temperature": 0.9, "maxOutputTokens": 500} # Voltar a orgânico
-
+        self.gemini_model_name = 'gemini-2.0-flash'
+        self.gemini_api_key = gemini_api_key
+        
+        self.generation_config = {"temperature": 0.9, "maxOutputTokens": 500} 
         print(f"Artoriasbot: Modelo Gemini configurado para {self.gemini_model_name} (orgânico, chamada síncrona).")
 
-    # Métodos de BD removidos, pois não há persistência nesta versão
-    # def _init_db_pool(self): pass
-    # def _load_conversation_history(self, user_id: str) -> list: return []
-    # def _save_conversation_entry(self, user_id: str, role: str, content: str): pass
-    # def _save_extracted_data(self, user_id: str, data: dict, action_type: str): pass
-
-    def process_message(self, user_message: str, user_id: str = "default_user") -> str: # <-- AGORA É 'def' (SÍNCRONO)
+    def process_message(self, user_message: str, user_id: str = "default_user") -> str:
         print(f"Artoriasbot: Processando mensagem de '{user_id}': '{user_message}'")
 
         current_flow_state = self.conversation_states.get(user_id, {"state": "initial", "history": []})
@@ -38,16 +29,17 @@ class Artoriasbot:
         extracted_data = {} 
 
         try:
-            # PROMPT ORGÂNICO E INTELIGENTE: Processar tudo que o usuário der e pedir só o que falta
+            # PROMPT: ORGÂNICO, ABSORVE TUDO E PEDE SÓ O QUE FALTA
             system_instruction = (
                 f"Você é Artorias AI, um assistente inteligente para a Tralhotec, uma empresa de soluções de TI.\n"
-                f"Sua missão é guiar o usuário pelos fluxos de SDR ou Suporte Técnico. Você deve ser capaz de: \n"
-                f"1.  **Entender toda a informação fornecida em um único turno.** Se o usuário der múltiplas informações de uma vez (ex: nome, empresa e problema), processe todas elas.\n"
-                f"2.  **Identificar qual a próxima informação *FALTANTE*** na sequência do fluxo e pedir APENAS por ela.\n"
-                f"3.  **Gerar o JSON estruturado** ao final do fluxo, quando todas as informações forem coletadas.\n"
-                f"4.  **Manter um tom profissional e útil**, sendo conciso, mas completo na resposta.\n"
+                f"Sua missão é guiar o usuário pelos fluxos de SDR ou Suporte Técnico. Para isso, você deve:\n"
+                f"1.  **Absorver TODAS as informações relevantes** que o usuário fornecer em um único turno (mensagem).\n"
+                f"2.  **Identificar qual a PRÓXIMA informação *FALTANTE*** na sequência do fluxo e pedir APENAS por ela.\n"
+                f"3.  **Gerar o JSON estruturado** ao final do fluxo, quando TODAS as informações (da sequência) forem coletadas.\n"
+                f"4.  Manter um tom profissional e útil, sendo conciso, mas completo na resposta.\n"
                 f"\n"
                 f"--- REGRAS DE FLUXO E COLETA DE DADOS ---\n"
+                f"**Priorize sempre coletar informações para SDR ou Suporte. Tente encaixar o usuário em um desses fluxos.**\n"
                 f"1.  **QUALIFICAÇÃO SDR (SEQUÊNCIA PRIORITÁRIA):**\n"
                 f"    Informações a coletar sequencialmente para SDR:\n"
                 f"    a. Nome completo e função/cargo.\n"
@@ -69,11 +61,10 @@ class Artoriasbot:
                 f"    ```\n"
                 f"\n"
                 f"--- COMPORTAMENTO GERAL ---\n"
-                f"1.  **Sempre tente encaixar o usuário em um dos fluxos (SDR ou Suporte).** Se a intenção for clara, comece pelo passo 1 do fluxo. Se o usuário fornecer informações para ambos os fluxos, priorize o SDR.\n"
-                f"2.  **Se o usuário fornecer todas as informações necessárias para um fluxo em um único turno, responda a mensagem final e inclua o JSON na mesma resposta.**\n"
-                f"3.  **Se o usuário desviar ou perguntar algo não relacionado no meio de um fluxo, gentilmente o redirecione ao fluxo, pedindo a próxima informação necessária.**\n"
-                f"4.  Se o usuário se despedir ou agradecer, responda cordialmente.\n"
-                f"5.  Se não entender, peça para reformular.\n"
+                f"1.  **Se o usuário fornecer informações já solicitadas, reconheça-as e peça a próxima informação FALTANTE.**\n"
+                f"2.  Se o usuário desviar ou perguntar algo não relacionado, redirecione-o ao fluxo, pedindo a próxima informação necessária.\n"
+                f"3.  Se o usuário se despedir ou agradecer, responda cordialmente.\n"
+                f"4.  Se não entender, peça para reformular.\n"
                 f"---"
             )
 
