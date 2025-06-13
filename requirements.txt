@@ -1,6 +1,6 @@
 Flask
 gunicorn
 python-dotenv
-google-generativeai # <-- Sem versão específica, para usar a última
+google-generativeai
 Flask-Cors
 requests

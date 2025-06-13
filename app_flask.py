@@ -2,7 +2,7 @@ from flask import Flask, request, jsonify
 import os
 from dotenv import load_dotenv
 import traceback
-# import asyncio # <-- REMOVIDO: Não precisamos mais de um loop assíncrono aqui
+# import asyncio # <-- REMOVIDO
 from flask_cors import CORS 
 
 # Importa o seu bot Artorias AI.
@@ -43,7 +43,6 @@ def messages():
         print(f"Flask: Mensagem recebida do usuário: '{user_message}'")
 
         # --- CHAMADA SÍNCRONA PARA O BOT ---
-        # Não precisa de loop asyncio aqui, pois BOT.process_message agora é síncrono.
         bot_response_text = BOT.process_message(user_message, user_id="test_user_123") 
         # --- FIM DA CHAMADA SÍNCRONA ---
             
