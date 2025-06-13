@@ -87,8 +87,7 @@ class Artoriasbot:
             gemini_contents.append({"role": "user", "parts": [{"text": user_message}]})
 
             # --- CHAMADA SÍNCRONA DIRETA PARA A API DO GEMINI VIA REQUESTS ---
-            gemini_api_url = f"[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/){self.gemini_model_name}:generateContent?key={self.gemini_api_key}"
-            
+            gemini_api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.gemini_model_name}:generateContent?key={self.gemini_api_key}"
             headers = {"Content-Type": "application/json"}
             payload = {
                 "contents": gemini_contents, # O histórico completo
