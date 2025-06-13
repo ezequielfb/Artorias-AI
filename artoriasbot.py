@@ -3,17 +3,17 @@ import traceback
 import google.generativeai as genai
 import os
 import json
-import requests # Necessário para chamadas HTTP síncronas
+import requests
 
 class Artoriasbot:
     def __init__(self):
-        self.conversation_states = {} # Histórico em memória apenas
+        self.conversation_states = {} 
 
         gemini_api_key = os.environ.get("GEMINI_API_KEY")
         if not gemini_api_key:
             raise ValueError("GEMINI_API_KEY não configurada nas variáveis de ambiente.")
         genai.configure(api_key=gemini_api_key)
-
+        
         self.gemini_model_name = 'gemini-2.0-flash' 
         self.gemini_api_key = gemini_api_key
         
@@ -21,7 +21,7 @@ class Artoriasbot:
 
         print(f"Artoriasbot: Modelo Gemini configurado para {self.gemini_model_name} (orgânico, chamada síncrona).")
 
-    def process_message(self, user_message: str, user_id: str = "default_user") -> str:
+    def process_message(self, user_message: str, user_id: str = "default_user") -> str: # AGORA SÍNCRONO (def)
         print(f"Artoriasbot: Processando mensagem de '{user_id}': '{user_message}'")
 
         current_flow_state = self.conversation_states.get(user_id, {"state": "initial", "history": []})
@@ -36,10 +36,11 @@ class Artoriasbot:
                 f"Sua missão é guiar o usuário pelos fluxos de SDR ou Suporte Técnico. Você deve ser capaz de: \n"
                 f"1.  **Entender toda a informação fornecida em um único turno.** Se o usuário der múltiplas informações de uma vez (ex: nome, empresa e problema), processe todas elas.\n"
                 f"2.  **Identificar qual a próxima informação *FALTANTE*** na sequência do fluxo e pedir APENAS por ela.\n"
-                f"3.  **Gerar o JSON estruturado** ao final do fluxo, quando todas as informações forem coletadas.\n"
+                f"3.  **Gerar os dados em formato de registro (JSON) estruturado** ao final do fluxo, quando todas as informações forem coletadas. O usuário NÃO verá esse JSON na conversa.\n" # <-- ATUALIZADO
                 f"4.  **Manter um tom profissional e útil**, sendo conciso, mas completo na resposta.\n"
                 f"\n"
                 f"--- REGRAS DE FLUXO E COLETA DE DADOS ---\n"
+                f"**Priorize sempre coletar informações para SDR ou Suporte. Tente encaixar o usuário em um desses fluxos.**\n"
                 f"1.  **QUALIFICAÇÃO SDR (SEQUÊNCIA PRIORITÁRIA):**\n"
                 f"    Informações a coletar sequencialmente para SDR:\n"
                 f"    a. Nome completo e função/cargo.\n"
@@ -47,7 +48,7 @@ class Artoriasbot:
                 f"    c. Principais desafios/necessidades.\n"
                 f"    d. Tamanho da empresa (Ex: até 10, 11-50, 50+).\n"
                 f"    e. E-mail de contato e/ou número de WhatsApp.\n"
-                f"    Ao final do fluxo SDR (todas as infos coletadas), inclua o JSON: \n"
+                f"    Ao final do fluxo SDR (todas as infos coletadas), forneça a mensagem final para o usuário (ex: 'Obrigado(a)! Sua solicitação foi registrada.') e, em uma nova linha, **então adicione o bloco JSON** (o usuário não verá este bloco).\n" # <-- ATUALIZADO
                 f"    ```json\n"
                 f"    {{\"action\": \"sdr_completed\", \"lead_info\": {{\"nome\": \"[Nome]\", \"funcao\": \"[Funcao]\", \"empresa\": \"[Empresa]\", \"desafios\": \"[Desafios]\", \"tamanho\": \"[Tamanho]\", \"email\": \"[Email]\", \"whatsapp\": \"[WhatsApp]\"}}}}\n"
                 f"    ```\n"
@@ -55,7 +56,7 @@ class Artoriasbot:
                 f"    Informações a coletar sequencialmente para Suporte:\n"
                 f"    a. Descrição detalhada do problema.\n"
                 f"    b. Informações de contato (nome, e-mail, empresa).\n"
-                f"    Ao final do fluxo de Suporte (todas as infos coletadas), inclua o JSON:\n"
+                f"    Ao final do fluxo de Suporte (todas as infos coletadas), forneça a mensagem final para o usuário (ex: 'Certo! Seu caso foi registrado.') e, em uma nova linha, **então adicione o bloco JSON** (o usuário não verá este bloco).\n" # <-- ATUALIZADO
                 f"    ```json\n"
                 f"    {{\"action\": \"support_escalated\", \"ticket_info\": {{\"problema\": \"[Problema]\", \"nome_contato\": \"[Nome Contato]\", \"email_contato\": \"[Email Contato]\", \"empresa_contato\": \"[Empresa Contato]\"}}}}\n"
                 f"    ```\n"
@@ -63,9 +64,10 @@ class Artoriasbot:
                 f"--- COMPORTAMENTO GERAL ---\n"
                 f"1.  **Sempre tente encaixar o usuário em um dos fluxos (SDR ou Suporte).** Se a intenção for clara, comece pelo passo 1 do fluxo. Se o usuário fornecer informações para ambos os fluxos, priorize o SDR.\n"
                 f"2.  **Se o usuário fornecer todas as informações necessárias para um fluxo em um único turno, responda a mensagem final e inclua o JSON na mesma resposta.**\n"
-                f"3.  **Se o usuário desviar ou perguntar algo não relacionado no meio de um fluxo, gentilmente o redirecione ao fluxo, pedindo a próxima informação necessária.**\n"
+                f"3.  **Se o usuário desviar ou perguntar algo não relacionado, redirecione-o ao fluxo, pedindo a próxima informação necessária.**\n"
                 f"4.  Se o usuário se despedir ou agradecer, responda cordialmente.\n"
                 f"5.  Se não entender, peça para reformular.\n"
+                f"6.  **Se o usuário perguntar 'o que é JSON' ou sobre o formato dos dados, explique de forma simples e contextualizada (ex: 'É um formato para organizar informações, como um formulário digital').**\n" # <-- ADICIONADO
                 f"---"
             )
 
@@ -85,7 +87,7 @@ class Artoriasbot:
             gemini_contents.append({"role": "user", "parts": [{"text": user_message}]})
 
             # --- CHAMADA SÍNCRONA DIRETA PARA A API DO GEMINI VIA REQUESTS ---
-            gemini_api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.gemini_model_name}:generateContent?key={self.gemini_api_key}"
+            gemini_api_url = f"[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/){self.gemini_model_name}:generateContent?key={self.gemini_api_key}"
             
             headers = {"Content-Type": "application/json"}
             payload = {
@@ -137,7 +139,7 @@ class Artoriasbot:
                         print(f"Artoriasbot: ERRO ao parsear JSON: {e}")
                         extracted_data = {} 
                 
-                # Salvamento de histórico apenas em memória
+                # Salvamento de histórico em memória apenas
                 current_flow_state["history"].append({"role": "user", "parts": [{"text": user_message}]})
                 current_flow_state["history"].append({"role": "model", "parts": [{"text": response_text}]})
 
