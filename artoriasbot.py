@@ -7,7 +7,7 @@ import requests
 
 class Artoriasbot:
     def __init__(self):
-        self.conversation_states = {} # Histórico em memória apenas
+        self.conversation_states = {} 
 
         gemini_api_key = os.environ.get("GEMINI_API_KEY")
         if not gemini_api_key:
@@ -26,27 +26,22 @@ class Artoriasbot:
 
         current_flow_state = self.conversation_states.get(user_id, {"state": "initial", "history": []})
         
+        # --- NOVO: Garante a primeira resposta padrão do bot ABSOLUTAMENTE ---
+        # Se é a PRIMEIRA interação do usuário (histórico vazio), independentemente do que ele diga,
+        # o bot dá a saudação EXATA desejada e não chama o Gemini para este turno.
+        if not current_flow_state["history"]:
+             response_text = "Eu sou o Artorias, como posso te ajudar?" # <-- EXATA RESPOSTA DESEJADA
+             # Salva a mensagem do usuário e a resposta padrão no histórico para o próximo turno.
+             current_flow_state["history"].append({"role": "user", "parts": [{"text": user_message}]})
+             current_flow_state["history"].append({"role": "model", "parts": [{"text": response_text}]})
+             self.conversation_states[user_id] = current_flow_state
+             return response_text # Retorna imediatamente após a saudação inicial (sem chamar o Gemini)
+        # --- FIM DO NOVO ---
+
         response_text = "Desculpe, não consegui processar sua requisição no momento. Tente novamente."
         extracted_data = {} 
 
         try:
-            # --- Garante a primeira resposta padrão do bot ou respostas exatas para identidade ---
-            user_message_lower = user_message.lower().strip() 
-            
-            if not current_flow_state["history"] and user_message_lower in ["olá", "ola", "oi", "bom dia", "boa tarde", "boa noite"]:
-                 response_text = "Eu sou o Artorias, como posso te ajudar?" 
-                 current_flow_state["history"].append({"role": "user", "parts": [{"text": user_message}]})
-                 current_flow_state["history"].append({"role": "model", "parts": [{"text": response_text}]})
-                 self.conversation_states[user_id] = current_flow_state
-                 return response_text 
-            elif user_message_lower in ["quem é você?", "como você pode me ajudar?", "qual sua função?", "o que você faz?"]:
-                 response_text = "Eu sou o Artorias, assistente da Tralhotec. Posso te ajudar com qualificação de leads ou suporte técnico."
-                 current_flow_state["history"].append({"role": "user", "parts": [{"text": user_message}]})
-                 current_flow_state["history"].append({"role": "model", "parts": [{"text": response_text}]})
-                 self.conversation_states[user_id] = current_flow_state
-                 return response_text
-            # --- FIM DA LÓGICA DE SAUDAÇÃO FIXA ---
-
             # PROMPT ORGÂNICO E INTELIGENTE: Processar tudo que o usuário der e pedir só o que falta
             system_instruction = (
                 f"Você é Artorias, um assistente inteligente para a Tralhotec, uma empresa de soluções de TI.\n" 
