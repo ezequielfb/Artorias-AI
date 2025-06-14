@@ -4,18 +4,18 @@ import google.generativeai as genai
 import os
 import json
 import requests
-import psycopg2 # <-- Manter este import para o passo de persistência
+import psycopg2 
 
 class Artoriasbot:
     def __init__(self):
-        self.conversation_states = {} # Histórico em memória apenas
-        self.db_connection_params = {} # Parâmetros de conexão do BD para leads
+        self.conversation_states = {} 
+        self.db_connection_params = {} 
 
         gemini_api_key = os.environ.get("GEMINI_API_KEY")
         if not gemini_api_key:
             raise ValueError("GEMINI_API_KEY não configurada nas variáveis de ambiente.")
         genai.configure(api_key=gemini_api_key)
-
+        
         self.gemini_model_name = 'gemini-2.0-flash' 
         self.gemini_api_key = gemini_api_key
         
@@ -23,7 +23,6 @@ class Artoriasbot:
 
         print(f"Artoriasbot: Modelo Gemini configurado para {self.gemini_model_name} (orgânico, chamada síncrona).")
 
-        # Configuração para salvar leads extraídos
         db_url = os.environ.get("DATABASE_URL")
         if db_url:
             self._parse_db_url(db_url)
@@ -89,23 +88,41 @@ class Artoriasbot:
 
         current_flow_state = self.conversation_states.get(user_id, {"state": "initial", "history": []})
         
-        # --- NOVO: Garante a primeira resposta padrão do bot ABSOLUTAMENTE no primeiro turno ---
-        # AQUI, o bot verifica se o histórico está vazio ANTES de qualquer outra lógica de prompt.
+        # --- NOVO E FORÇADO: Garante a primeira resposta padrão do bot ou respostas exatas ---
+        user_message_lower = user_message.lower().strip() 
+        
+        # 1. Saudação Inicial Fixa para QUALQUER primeira interação
         if not current_flow_state["history"]:
             response_text = "Eu sou o Artorias, como posso te ajudar?" 
             current_flow_state["history"].append({"role": "user", "parts": [{"text": user_message}]})
             current_flow_state["history"].append({"role": "model", "parts": [{"text": response_text}]})
             self.conversation_states[user_id] = current_flow_state
             return response_text 
-        # --- FIM DO NOVO ---
+        
+        # 2. Respostas Fixas para Perguntas de Identidade/Ajuda (mesmo que não seja o 1o turno)
+        elif user_message_lower in ["quem é você?", "como você pode me ajudar?", "qual sua função?", "o que você faz?"]: 
+            response_text = "Eu sou o Artorias, assistente da Tralhotec. Posso te ajudar com qualificação de leads ou suporte técnico."
+            current_flow_state["history"].append({"role": "user", "parts": [{"text": user_message}]})
+            current_flow_state["history"].append({"role": "model", "parts": [{"text": response_text}]})
+            self.conversation_states[user_id] = current_flow_state
+            return response_text
+        
+        # 3. Respostas Fixas para Recusa de Conhecimento Geral (sem redirecionamento, absoluta)
+        elif user_message_lower in ["consegue me dizer os números primos entre 0 e 32?", "me diga os números primos de 1 a 100", "me conte uma piada", "qual a capital da frança?", "me fale sobre historia"]: # Adicione mais exemplos se quiser
+            response_text = "Desculpe, não consigo ajudar com isso. Minha função é auxiliar com qualificação SDR ou suporte técnico."
+            current_flow_state["history"].append({"role": "user", "parts": [{"text": user_message}]})
+            current_flow_state["history"].append({"role": "model", "parts": [{"text": response_text}]})
+            self.conversation_states[user_id] = current_flow_state
+            return response_text
+        # --- FIM DA LÓGICA DE RESPOSTAS FIXAS FORÇADAS ---
 
         response_text = "Desculpe, não consegui processar sua requisição no momento. Tente novamente."
         extracted_data = {} 
 
         try:
-            # PROMPT ORGÂNICO E INTELIGENTE
+            # PROMPT ORGÂNICO E INTELIGENTE (só para quando não for uma das respostas fixas acima)
             system_instruction = (
-                f"Você é Artorias, um assistente inteligente para a Tralhotec, uma empresa de soluções de TI.\n" 
+                f"Você é Artorias AI, um assistente inteligente para a Tralhotec, uma empresa de soluções de TI.\n" 
                 f"Sua missão é guiar o usuário pelos fluxos de SDR ou Suporte Técnico. Você deve ser capaz de: \n"
                 f"1.  **Absorver TODAS as informações relevantes** que o usuário fornecer em um único turno (mensagem).\n"
                 f"2.  **Identificar qual a PRÓXIMA informação *FALTANTE*** na sequência do fluxo e pedir APENAS por ela.\n"
@@ -137,7 +154,7 @@ class Artoriasbot:
                 f"--- COMPORTAMENTO GERAL ---\n"
                 f"1.  **Sempre tente encaixar o usuário em um dos fluxos (SDR ou Suporte).** Se a intenção for clara, comece pelo passo 1 do fluxo. Se o usuário fornecer informações para ambos os fluxos, priorize o SDR.\n"
                 f"2.  **Se o usuário fornecer todas as informações necessárias para um fluxo em um único turno, responda a mensagem final e inclua o JSON na mesma resposta.**\n"
-                f"3.  **Se o usuário desviar ou perguntar algo não relacionado (ex: perguntas de conhecimento geral como matemática, história, etc.), responda EXATAMENTE: 'Desculpe, não consigo ajudar com isso. Minha função é auxiliar com qualificação SDR ou suporte técnico.'**\n" 
+                f"3.  **Se o usuário desviar ou perguntar algo não relacionado, responda que não pode ajudar e redirecione-o ao fluxo (como nos exemplos).**\n"
                 f"4.  Se o usuário se despedir ou agradecer, responda cordialmente.\n"
                 f"5.  Se não entender, peça para reformular.\n"
                 f"6.  **Se o usuário perguntar 'o que é JSON' ou sobre o formato dos dados, explique de forma simples e contextualizada (ex: 'É um formato para organizar informações, como um formulário digital').**\n"
@@ -151,7 +168,7 @@ class Artoriasbot:
             gemini_contents.append({"role": "user", "parts": [{"text": system_instruction}]})
             
             # Adiciona a resposta inicial do bot (se aplicável ao primeiro turno da conversa)
-            if not current_flow_state["history"]: # Este bloco agora está dentro do 'else' do primeiro 'if'
+            if not current_flow_state["history"]: # Se é o início da conversa (e não foi saudação simples)
                 gemini_contents.append({"role": "model", "parts": [{"text": "Entendido. Estou pronto para ajudar a Tralhotec. Como posso iniciar?"}]})
             else:
                 gemini_contents.extend(current_flow_state["history"])
