@@ -4,18 +4,18 @@ import google.generativeai as genai
 import os
 import json
 import requests
-import psycopg2 
+import psycopg2 # <-- ADICIONADO: Driver PostgreSQL síncrono para persistência
 
 class Artoriasbot:
     def __init__(self):
-        self.conversation_states = {} 
-        self.db_connection_params = {} 
+        self.conversation_states = {} # Histórico em memória apenas
+        self.db_connection_params = {} # Parâmetros de conexão do BD para leads
 
         gemini_api_key = os.environ.get("GEMINI_API_KEY")
         if not gemini_api_key:
             raise ValueError("GEMINI_API_KEY não configurada nas variáveis de ambiente.")
         genai.configure(api_key=gemini_api_key)
-        
+
         self.gemini_model_name = 'gemini-2.0-flash' 
         self.gemini_api_key = gemini_api_key
         
@@ -23,6 +23,7 @@ class Artoriasbot:
 
         print(f"Artoriasbot: Modelo Gemini configurado para {self.gemini_model_name} (orgânico, chamada síncrona).")
 
+        # --- Configuração para salvar leads extraídos no BD (psycopg2) ---
         db_url = os.environ.get("DATABASE_URL")
         if db_url:
             self._parse_db_url(db_url)
@@ -31,6 +32,7 @@ class Artoriasbot:
             print("Artoriasbot: AVISO: DATABASE_URL não configurada. Leads não serão salvos no BD.")
 
     def _parse_db_url(self, url: str):
+        """Parseia a DATABASE_URL para extrair parâmetros de conexão."""
         try:
             from urllib.parse import urlparse
             result = urlparse(url)
@@ -40,13 +42,14 @@ class Artoriasbot:
                 "password": result.password,
                 "host": result.hostname,
                 "port": result.port,
-                "sslmode": "require" 
+                "sslmode": "require" # Railway geralmente exige SSL
             }
         except Exception as e:
             print(f"ERRO: Falha ao parsear DATABASE_URL: {e}")
             self.db_connection_params = {}
 
     def _get_db_connection(self):
+        """Obtém uma conexão síncrona com o banco de dados."""
         if not self.db_connection_params:
             raise ValueError("Parâmetros de conexão com o BD não configurados.")
         try:
@@ -56,6 +59,7 @@ class Artoriasbot:
             raise
 
     def _save_extracted_data(self, user_id: str, data: dict, action_type: str):
+        """Salva os dados estruturados extraídos (SDR/Suporte) no banco de dados."""
         if not self.db_connection_params:
             print("AVISO: DATABASE_URL não configurada, dados não serão salvos no BD.")
             return
@@ -88,45 +92,28 @@ class Artoriasbot:
 
         current_flow_state = self.conversation_states.get(user_id, {"state": "initial", "history": []})
         
-        # --- NOVO E FORÇADO: Garante a primeira resposta padrão do bot ou respostas exatas ---
-        user_message_lower = user_message.lower().strip() 
-        
-        # 1. Saudação Inicial Fixa para QUALQUER primeira interação
+        # --- NOVO: Garante a primeira resposta padrão do bot ABSOLUTAMENTE no primeiro turno ---
+        # Se é a PRIMEIRA interação do usuário (histórico vazio), independentemente do que ele diga,
+        # o bot dá a saudação EXATA desejada e não chama o Gemini para este turno.
         if not current_flow_state["history"]:
-            response_text = "Eu sou o Artorias, como posso te ajudar?" 
-            current_flow_state["history"].append({"role": "user", "parts": [{"text": user_message}]})
-            current_flow_state["history"].append({"role": "model", "parts": [{"text": response_text}]})
-            self.conversation_states[user_id] = current_flow_state
-            return response_text 
-        
-        # 2. Respostas Fixas para Perguntas de Identidade/Ajuda (mesmo que não seja o 1o turno)
-        elif user_message_lower in ["quem é você?", "como você pode me ajudar?", "qual sua função?", "o que você faz?"]: 
-            response_text = "Eu sou o Artorias, assistente da Tralhotec. Posso te ajudar com qualificação de leads ou suporte técnico."
-            current_flow_state["history"].append({"role": "user", "parts": [{"text": user_message}]})
-            current_flow_state["history"].append({"role": "model", "parts": [{"text": response_text}]})
-            self.conversation_states[user_id] = current_flow_state
-            return response_text
-        
-        # 3. Respostas Fixas para Recusa de Conhecimento Geral (sem redirecionamento, absoluta)
-        elif user_message_lower in ["consegue me dizer os números primos entre 0 e 32?", "me diga os números primos de 1 a 100", "me conte uma piada", "qual a capital da frança?", "me fale sobre historia"]: # Adicione mais exemplos se quiser
-            response_text = "Desculpe, não consigo ajudar com isso. Minha função é auxiliar com qualificação SDR ou suporte técnico."
-            current_flow_state["history"].append({"role": "user", "parts": [{"text": user_message}]})
-            current_flow_state["history"].append({"role": "model", "parts": [{"text": response_text}]})
-            self.conversation_states[user_id] = current_flow_state
-            return response_text
-        # --- FIM DA LÓGICA DE RESPOSTAS FIXAS FORÇADAS ---
+             response_text = "Eu sou o Artorias, como posso te ajudar?" 
+             current_flow_state["history"].append({"role": "user", "parts": [{"text": user_message}]})
+             current_flow_state["history"].append({"role": "model", "parts": [{"text": response_text}]})
+             self.conversation_states[user_id] = current_flow_state
+             return response_text # Retorna imediatamente após a saudação inicial (sem chamar o Gemini)
+        # --- FIM DO NOVO ---
 
         response_text = "Desculpe, não consegui processar sua requisição no momento. Tente novamente."
         extracted_data = {} 
 
         try:
-            # PROMPT ORGÂNICO E INTELIGENTE (só para quando não for uma das respostas fixas acima)
+            # PROMPT ORGÂNICO E INTELIGENTE: Processar tudo que o usuário der e pedir só o que falta
             system_instruction = (
                 f"Você é Artorias AI, um assistente inteligente para a Tralhotec, uma empresa de soluções de TI.\n" 
                 f"Sua missão é guiar o usuário pelos fluxos de SDR ou Suporte Técnico. Você deve ser capaz de: \n"
                 f"1.  **Absorver TODAS as informações relevantes** que o usuário fornecer em um único turno (mensagem).\n"
                 f"2.  **Identificar qual a PRÓXIMA informação *FALTANTE*** na sequência do fluxo e pedir APENAS por ela.\n"
-                f"3.  **Gerar o JSON estruturado** ao final do fluxo, quando todas as informações forem coletadas. O usuário NÃO verá este registro na conversa, apenas a mensagem final.\n" 
+                f"3.  **Gerar os dados em formato de registro (JSON) estruturado** ao final do fluxo, quando todas as informações forem coletadas. O usuário NÃO verá este registro na conversa, apenas a mensagem final.\n" 
                 f"4.  Manter um tom profissional e útil, sendo conciso, mas completo na resposta.\n"
                 f"\n"
                 f"--- REGRAS DE FLUXO E COLETA DE DADOS ---\n"
@@ -154,7 +141,7 @@ class Artoriasbot:
                 f"--- COMPORTAMENTO GERAL ---\n"
                 f"1.  **Sempre tente encaixar o usuário em um dos fluxos (SDR ou Suporte).** Se a intenção for clara, comece pelo passo 1 do fluxo. Se o usuário fornecer informações para ambos os fluxos, priorize o SDR.\n"
                 f"2.  **Se o usuário fornecer todas as informações necessárias para um fluxo em um único turno, responda a mensagem final e inclua o JSON na mesma resposta.**\n"
-                f"3.  **Se o usuário desviar ou perguntar algo não relacionado, responda que não pode ajudar e redirecione-o ao fluxo (como nos exemplos).**\n"
+                f"3.  **Se o usuário desviar ou perguntar algo não relacionado (ex: perguntas de conhecimento geral como matemática, história, etc.), responda EXATAMENTE: 'Desculpe, não consigo ajudar com isso. Minha função é auxiliar com qualificação SDR ou suporte técnico.'**\n" 
                 f"4.  Se o usuário se despedir ou agradecer, responda cordialmente.\n"
                 f"5.  Se não entender, peça para reformular.\n"
                 f"6.  **Se o usuário perguntar 'o que é JSON' ou sobre o formato dos dados, explique de forma simples e contextualizada (ex: 'É um formato para organizar informações, como um formulário digital').**\n"
