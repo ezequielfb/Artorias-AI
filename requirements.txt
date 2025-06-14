@@ -4,3 +4,4 @@ python-dotenv
 google-generativeai
 Flask-Cors
 requests
+psycopg2-binary
