@@ -4,7 +4,7 @@ import google.generativeai as genai
 import os
 import json
 import requests
-import psycopg2 # <-- Adicionado: Driver PostgreSQL síncrono
+import psycopg2 # <-- ADICIONADO: Driver PostgreSQL síncrono
 
 class Artoriasbot:
     def __init__(self):
@@ -83,7 +83,7 @@ class Artoriasbot:
             print(f"ERRO: Falha ao salvar dados extraídos no BD: {e}")
             traceback.print_exc(file=sys.stdout)
             if conn:
-                conn.rollback() # Reverte a transação em caso de erro
+                conn.rollback() 
         finally:
             if conn:
                 conn.close()
