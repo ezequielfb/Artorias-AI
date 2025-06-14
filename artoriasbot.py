@@ -4,16 +4,18 @@ import google.generativeai as genai
 import os
 import json
 import requests
+import psycopg2 # <-- Manter este import para o passo de persistência
 
 class Artoriasbot:
     def __init__(self):
-        self.conversation_states = {} 
+        self.conversation_states = {} # Histórico em memória apenas
+        self.db_connection_params = {} # Parâmetros de conexão do BD para leads
 
         gemini_api_key = os.environ.get("GEMINI_API_KEY")
         if not gemini_api_key:
             raise ValueError("GEMINI_API_KEY não configurada nas variáveis de ambiente.")
         genai.configure(api_key=gemini_api_key)
-        
+
         self.gemini_model_name = 'gemini-2.0-flash' 
         self.gemini_api_key = gemini_api_key
         
@@ -21,41 +23,89 @@ class Artoriasbot:
 
         print(f"Artoriasbot: Modelo Gemini configurado para {self.gemini_model_name} (orgânico, chamada síncrona).")
 
+        # Configuração para salvar leads extraídos
+        db_url = os.environ.get("DATABASE_URL")
+        if db_url:
+            self._parse_db_url(db_url)
+            print("Artoriasbot: Parâmetros de BD para leads configurados.")
+        else:
+            print("Artoriasbot: AVISO: DATABASE_URL não configurada. Leads não serão salvos no BD.")
+
+    def _parse_db_url(self, url: str):
+        try:
+            from urllib.parse import urlparse
+            result = urlparse(url)
+            self.db_connection_params = {
+                "database": result.path[1:],
+                "user": result.username,
+                "password": result.password,
+                "host": result.hostname,
+                "port": result.port,
+                "sslmode": "require" 
+            }
+        except Exception as e:
+            print(f"ERRO: Falha ao parsear DATABASE_URL: {e}")
+            self.db_connection_params = {}
+
+    def _get_db_connection(self):
+        if not self.db_connection_params:
+            raise ValueError("Parâmetros de conexão com o BD não configurados.")
+        try:
+            return psycopg2.connect(**self.db_connection_params)
+        except Exception as e:
+            print(f"ERRO: Falha ao conectar ao banco de dados: {e}")
+            raise
+
+    def _save_extracted_data(self, user_id: str, data: dict, action_type: str):
+        if not self.db_connection_params:
+            print("AVISO: DATABASE_URL não configurada, dados não serão salvos no BD.")
+            return
+
+        conn = None
+        try:
+            conn = self._get_db_connection()
+            cur = conn.cursor()
+            
+            cur.execute(
+                """
+                INSERT INTO extracted_leads_tickets (user_id, action_type, data_json, timestamp)
+                VALUES (%s, %s, %s::jsonb, NOW());
+                """,
+                (user_id, action_type, json.dumps(data))
+            )
+            conn.commit()
+            print(f"Artoriasbot: Dados extraídos de '{action_type}' SALVOS no BD para '{user_id}'.")
+        except Exception as e:
+            print(f"ERRO: Falha ao salvar dados extraídos no BD: {e}")
+            traceback.print_exc(file=sys.stdout)
+            if conn:
+                conn.rollback() 
+        finally:
+            if conn:
+                conn.close()
+
     def process_message(self, user_message: str, user_id: str = "default_user") -> str: # Síncrono
         print(f"Artoriasbot: Processando mensagem de '{user_id}': '{user_message}'")
 
         current_flow_state = self.conversation_states.get(user_id, {"state": "initial", "history": []})
         
+        # --- NOVO: Garante a primeira resposta padrão do bot ABSOLUTAMENTE no primeiro turno ---
+        # AQUI, o bot verifica se o histórico está vazio ANTES de qualquer outra lógica de prompt.
+        if not current_flow_state["history"]:
+            response_text = "Eu sou o Artorias, como posso te ajudar?" 
+            current_flow_state["history"].append({"role": "user", "parts": [{"text": user_message}]})
+            current_flow_state["history"].append({"role": "model", "parts": [{"text": response_text}]})
+            self.conversation_states[user_id] = current_flow_state
+            return response_text 
+        # --- FIM DO NOVO ---
+
         response_text = "Desculpe, não consegui processar sua requisição no momento. Tente novamente."
         extracted_data = {} 
 
         try:
-            # --- Garante a primeira resposta padrão do bot ou respostas exatas para identidade ---
-            user_message_lower = user_message.lower().strip() 
-            
-            if not current_flow_state["history"] and user_message_lower in ["olá", "ola", "oi", "bom dia", "boa tarde", "boa noite"]:
-                 response_text = "Eu sou o Artorias, como posso te ajudar?" 
-                 current_flow_state["history"].append({"role": "user", "parts": [{"text": user_message}]})
-                 current_flow_state["history"].append({"role": "model", "parts": [{"text": response_text}]})
-                 self.conversation_states[user_id] = current_flow_state
-                 return response_text 
-            elif user_message_lower in ["quem é você?", "como você pode me ajudar?", "qual sua função?", "o que você faz?"]:
-                 response_text = "Eu sou o Artorias, assistente da Tralhotec. Posso te ajudar com qualificação de leads ou suporte técnico."
-                 current_flow_state["history"].append({"role": "user", "parts": [{"text": user_message}]})
-                 current_flow_state["history"].append({"role": "model", "parts": [{"text": response_text}]})
-                 self.conversation_states[user_id] = current_flow_state
-                 return response_text
-            elif user_message_lower in ["consegue me dizer os números primos entre 0 e 32?", "me diga os números primos de 1 a 100", "me conte uma piada", "qual a capital da frança?"]: # Exemplos de perguntas de conhecimento geral
-                 response_text = "Desculpe, não consigo ajudar com isso. Minha função é auxiliar com qualificação SDR ou suporte técnico."
-                 current_flow_state["history"].append({"role": "user", "parts": [{"text": user_message}]})
-                 current_flow_state["history"].append({"role": "model", "parts": [{"text": response_text}]})
-                 self.conversation_states[user_id] = current_flow_state
-                 return response_text
-            # --- FIM DA LÓGICA DE RESPOSTAS FIXAS ---
-
-            # PROMPT ORGÂNICO E INTELIGENTE: Processar tudo que o usuário der e pedir só o que falta
+            # PROMPT ORGÂNICO E INTELIGENTE
             system_instruction = (
-                f"Você é Artorias AI, um assistente inteligente para a Tralhotec, uma empresa de soluções de TI.\n" 
+                f"Você é Artorias, um assistente inteligente para a Tralhotec, uma empresa de soluções de TI.\n" 
                 f"Sua missão é guiar o usuário pelos fluxos de SDR ou Suporte Técnico. Você deve ser capaz de: \n"
                 f"1.  **Absorver TODAS as informações relevantes** que o usuário fornecer em um único turno (mensagem).\n"
                 f"2.  **Identificar qual a PRÓXIMA informação *FALTANTE*** na sequência do fluxo e pedir APENAS por ela.\n"
@@ -63,6 +113,7 @@ class Artoriasbot:
                 f"4.  Manter um tom profissional e útil, sendo conciso, mas completo na resposta.\n"
                 f"\n"
                 f"--- REGRAS DE FLUXO E COLETA DE DADOS ---\n"
+                f"**Priorize sempre coletar informações para SDR ou Suporte. Tente encaixar o usuário em um desses fluxos.**\n"
                 f"1.  **QUALIFICAÇÃO SDR (SEQUÊNCIA PRIORITÁRIA):**\n"
                 f"    Informações a coletar sequencialmente para SDR:\n"
                 f"    a. Nome completo e função/cargo.\n"
@@ -86,7 +137,7 @@ class Artoriasbot:
                 f"--- COMPORTAMENTO GERAL ---\n"
                 f"1.  **Sempre tente encaixar o usuário em um dos fluxos (SDR ou Suporte).** Se a intenção for clara, comece pelo passo 1 do fluxo. Se o usuário fornecer informações para ambos os fluxos, priorize o SDR.\n"
                 f"2.  **Se o usuário fornecer todas as informações necessárias para um fluxo em um único turno, responda a mensagem final e inclua o JSON na mesma resposta.**\n"
-                f"3.  **Se o usuário desviar ou perguntar algo não relacionado, redirecione-o ao fluxo, pedindo a próxima informação necessária.**\n"
+                f"3.  **Se o usuário desviar ou perguntar algo não relacionado (ex: perguntas de conhecimento geral como matemática, história, etc.), responda EXATAMENTE: 'Desculpe, não consigo ajudar com isso. Minha função é auxiliar com qualificação SDR ou suporte técnico.'**\n" 
                 f"4.  Se o usuário se despedir ou agradecer, responda cordialmente.\n"
                 f"5.  Se não entender, peça para reformular.\n"
                 f"6.  **Se o usuário perguntar 'o que é JSON' ou sobre o formato dos dados, explique de forma simples e contextualizada (ex: 'É um formato para organizar informações, como um formulário digital').**\n"
@@ -100,7 +151,7 @@ class Artoriasbot:
             gemini_contents.append({"role": "user", "parts": [{"text": system_instruction}]})
             
             # Adiciona a resposta inicial do bot (se aplicável ao primeiro turno da conversa)
-            if not current_flow_state["history"]: # Se é o início da conversa (e não foi saudação simples)
+            if not current_flow_state["history"]: # Este bloco agora está dentro do 'else' do primeiro 'if'
                 gemini_contents.append({"role": "model", "parts": [{"text": "Entendido. Estou pronto para ajudar a Tralhotec. Como posso iniciar?"}]})
             else:
                 gemini_contents.extend(current_flow_state["history"])
@@ -141,11 +192,10 @@ class Artoriasbot:
                         extracted_data = json.loads(json_str)
                         print(f"Artoriasbot: JSON extraído: {extracted_data}")
                         
-                        # --- NOVO: SALVAR DADOS EXTRAÍDOS NO BANCO DE DADOS ---
+                        # --- NOVO: SALVAR DADOS EXTRAÍDOS NO BANCO DE DADOS (AGORA ATIVO) ---
                         action_type = extracted_data.get("action", "unknown")
                         if action_type in ["sdr_completed", "support_escalated"]:
-                            # Esta chamada está ativa novamente
-                            self._save_extracted_data(user_id, extracted_data, action_type) 
+                            self._save_extracted_data(user_id, extracted_data, action_type) # Chamada para salvar o JSON
                         # --- FIM DO NOVO ---
                         
                         response_text = response_content[:json_start_index].strip()
