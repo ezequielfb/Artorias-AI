@@ -3,17 +3,19 @@ import traceback
 import google.generativeai as genai
 import os
 import json
-import requests 
+import requests
+import psycopg2 # <-- Adicionado: Driver PostgreSQL síncrono
 
 class Artoriasbot:
     def __init__(self):
-        self.conversation_states = {} 
+        self.conversation_states = {} # Histórico em memória apenas
+        self.db_connection_params = {} # Parâmetros de conexão do BD para leads
 
         gemini_api_key = os.environ.get("GEMINI_API_KEY")
         if not gemini_api_key:
             raise ValueError("GEMINI_API_KEY não configurada nas variáveis de ambiente.")
         genai.configure(api_key=gemini_api_key)
-        
+
         self.gemini_model_name = 'gemini-2.0-flash' 
         self.gemini_api_key = gemini_api_key
         
@@ -21,34 +23,105 @@ class Artoriasbot:
 
         print(f"Artoriasbot: Modelo Gemini configurado para {self.gemini_model_name} (orgânico, chamada síncrona).")
 
+        # Configuração para salvar leads extraídos
+        db_url = os.environ.get("DATABASE_URL")
+        if db_url:
+            self._parse_db_url(db_url)
+            print("Artoriasbot: Parâmetros de BD para leads configurados.")
+        else:
+            print("Artoriasbot: AVISO: DATABASE_URL não configurada. Leads não serão salvos no BD.")
+
+
+    def _parse_db_url(self, url: str):
+        """Parseia a DATABASE_URL para extrair parâmetros de conexão."""
+        try:
+            from urllib.parse import urlparse
+            result = urlparse(url)
+            self.db_connection_params = {
+                "database": result.path[1:],
+                "user": result.username,
+                "password": result.password,
+                "host": result.hostname,
+                "port": result.port,
+                "sslmode": "require" # Railway geralmente exige SSL
+            }
+        except Exception as e:
+            print(f"ERRO: Falha ao parsear DATABASE_URL: {e}")
+            self.db_connection_params = {}
+
+    def _get_db_connection(self):
+        """Obtém uma conexão síncrona com o banco de dados."""
+        if not self.db_connection_params:
+            raise ValueError("Parâmetros de conexão com o BD não configurados.")
+        try:
+            return psycopg2.connect(**self.db_connection_params)
+        except Exception as e:
+            print(f"ERRO: Falha ao conectar ao banco de dados: {e}")
+            raise
+
+    def _save_extracted_data(self, user_id: str, data: dict, action_type: str):
+        """Salva os dados estruturados extraídos (SDR/Suporte) no banco de dados."""
+        if not self.db_connection_params:
+            print("AVISO: DATABASE_URL não configurada, dados não serão salvos no BD.")
+            return
+
+        conn = None
+        try:
+            conn = self._get_db_connection()
+            cur = conn.cursor()
+            
+            cur.execute(
+                """
+                INSERT INTO extracted_leads_tickets (user_id, action_type, data_json, timestamp)
+                VALUES (%s, %s, %s::jsonb, NOW());
+                """,
+                (user_id, action_type, json.dumps(data))
+            )
+            conn.commit()
+            print(f"Artoriasbot: Dados extraídos de '{action_type}' SALVOS no BD para '{user_id}'.")
+        except Exception as e:
+            print(f"ERRO: Falha ao salvar dados extraídos no BD: {e}")
+            traceback.print_exc(file=sys.stdout)
+            if conn:
+                conn.rollback() # Reverte a transação em caso de erro
+        finally:
+            if conn:
+                conn.close()
+
+
     def process_message(self, user_message: str, user_id: str = "default_user") -> str: # Síncrono
         print(f"Artoriasbot: Processando mensagem de '{user_id}': '{user_message}'")
 
         current_flow_state = self.conversation_states.get(user_id, {"state": "initial", "history": []})
         
-        # --- NOVO: Garante a primeira resposta padrão do bot ABSOLUTAMENTE ---
-        # Se é a PRIMEIRA interação do usuário (histórico vazio), independentemente do que ele diga,
-        # o bot dá a saudação EXATA desejada e não chama o Gemini para este turno.
-        if not current_flow_state["history"]:
-             response_text = "Eu sou o Artorias, como posso te ajudar?" # <-- EXATA RESPOSTA DESEJADA
-             # Salva a mensagem do usuário e a resposta padrão no histórico para o próximo turno.
-             current_flow_state["history"].append({"role": "user", "parts": [{"text": user_message}]})
-             current_flow_state["history"].append({"role": "model", "parts": [{"text": response_text}]})
-             self.conversation_states[user_id] = current_flow_state
-             return response_text # Retorna imediatamente após a saudação inicial (sem chamar o Gemini)
-        # --- FIM DO NOVO ---
-
         response_text = "Desculpe, não consegui processar sua requisição no momento. Tente novamente."
         extracted_data = {} 
 
         try:
+            # --- Garante a primeira resposta padrão do bot ou respostas exatas para identidade ---
+            user_message_lower = user_message.lower().strip() 
+            
+            if not current_flow_state["history"] and user_message_lower in ["olá", "ola", "oi", "bom dia", "boa tarde", "boa noite"]:
+                 response_text = "Eu sou o Artorias, como posso te ajudar?" 
+                 current_flow_state["history"].append({"role": "user", "parts": [{"text": user_message}]})
+                 current_flow_state["history"].append({"role": "model", "parts": [{"text": response_text}]})
+                 self.conversation_states[user_id] = current_flow_state
+                 return response_text 
+            elif user_message_lower in ["quem é você?", "como você pode me ajudar?", "qual sua função?", "o que você faz?"]:
+                 response_text = "Eu sou o Artorias, assistente da Tralhotec. Posso te ajudar com qualificação de leads ou suporte técnico."
+                 current_flow_state["history"].append({"role": "user", "parts": [{"text": user_message}]})
+                 current_flow_state["history"].append({"role": "model", "parts": [{"text": response_text}]})
+                 self.conversation_states[user_id] = current_flow_state
+                 return response_text
+            # --- FIM DA LÓGICA DE SAUDAÇÃO FIXA ---
+
             # PROMPT ORGÂNICO E INTELIGENTE: Processar tudo que o usuário der e pedir só o que falta
             system_instruction = (
-                f"Você é Artorias, um assistente inteligente para a Tralhotec, uma empresa de soluções de TI.\n" 
+                f"Você é Artorias AI, um assistente inteligente para a Tralhotec, uma empresa de soluções de TI.\n" 
                 f"Sua missão é guiar o usuário pelos fluxos de SDR ou Suporte Técnico. Você deve ser capaz de: \n"
                 f"1.  **Absorver TODAS as informações relevantes** que o usuário fornecer em um único turno (mensagem).\n"
                 f"2.  **Identificar qual a PRÓXIMA informação *FALTANTE*** na sequência do fluxo e pedir APENAS por ela.\n"
-                f"3.  **Gerar o JSON estruturado** ao final do fluxo, quando todas as informações forem coletadas. O usuário NÃO verá este registro na conversa, apenas a mensagem final.\n" 
+                f"3.  **Gerar os dados em formato de registro (JSON) estruturado** ao final do fluxo, quando todas as informações forem coletadas. O usuário NÃO verá este registro na conversa, apenas a mensagem final.\n" 
                 f"4.  Manter um tom profissional e útil, sendo conciso, mas completo na resposta.\n"
                 f"\n"
                 f"--- REGRAS DE FLUXO E COLETA DE DADOS ---\n"
@@ -131,10 +204,11 @@ class Artoriasbot:
                         extracted_data = json.loads(json_str)
                         print(f"Artoriasbot: JSON extraído: {extracted_data}")
                         
-                        # Código de salvamento de dados temporariamente desativado
-                        # action_type = extracted_data.get("action", "unknown")
-                        # if action_type in ["sdr_completed", "support_escalated"]:
-                        #    pass 
+                        # --- NOVO: SALVAR DADOS EXTRAÍDOS NO BANCO DE DADOS ---
+                        action_type = extracted_data.get("action", "unknown")
+                        if action_type in ["sdr_completed", "support_escalated"]:
+                            self._save_extracted_data(user_id, extracted_data, action_type) # Chamada para salvar o JSON
+                        # --- FIM DO NOVO ---
                         
                         response_text = response_content[:json_start_index].strip()
                         
