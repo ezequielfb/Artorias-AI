@@ -4,12 +4,13 @@ import google.generativeai as genai
 import os
 import json
 import requests
-import psycopg2 # <-- ADICIONADO: Driver PostgreSQL síncrono
+import psycopg2 # <-- ADICIONADO: Driver PostgreSQL síncrono para persistência
+from urllib.parse import urlparse # <-- ADICIONADO: Para parsear a URL do BD
 
 class Artoriasbot:
     def __init__(self):
         self.conversation_states = {} # Histórico em memória apenas
-        self.db_connection_params = {} # Parâmetros de conexão do BD para leads
+        self.db_connection_params = {} # Parâmetros de conexão do BD
 
         gemini_api_key = os.environ.get("GEMINI_API_KEY")
         if not gemini_api_key:
@@ -23,7 +24,7 @@ class Artoriasbot:
 
         print(f"Artoriasbot: Modelo Gemini configurado para {self.gemini_model_name} (orgânico, chamada síncrona).")
 
-        # Configuração para salvar leads extraídos
+        # --- Configuração para salvar leads extraídos no BD (psycopg2) ---
         db_url = os.environ.get("DATABASE_URL")
         if db_url:
             self._parse_db_url(db_url)
@@ -31,11 +32,9 @@ class Artoriasbot:
         else:
             print("Artoriasbot: AVISO: DATABASE_URL não configurada. Leads não serão salvos no BD.")
 
-
     def _parse_db_url(self, url: str):
         """Parseia a DATABASE_URL para extrair parâmetros de conexão."""
         try:
-            from urllib.parse import urlparse
             result = urlparse(url)
             self.db_connection_params = {
                 "database": result.path[1:],
@@ -88,7 +87,6 @@ class Artoriasbot:
             if conn:
                 conn.close()
 
-
     def process_message(self, user_message: str, user_id: str = "default_user") -> str: # Síncrono
         print(f"Artoriasbot: Processando mensagem de '{user_id}': '{user_message}'")
 
@@ -98,22 +96,31 @@ class Artoriasbot:
         extracted_data = {} 
 
         try:
-            # --- Garante a primeira resposta padrão do bot ou respostas exatas para identidade ---
+            # --- NOVO: Garante a primeira resposta padrão do bot ou respostas exatas para identidade ---
             user_message_lower = user_message.lower().strip() 
             
-            if not current_flow_state["history"] and user_message_lower in ["olá", "ola", "oi", "bom dia", "boa tarde", "boa noite"]:
+            # 1. Saudação Inicial Fixa: Se é a PRIMEIRA interação do usuário (histórico vazio)
+            if not current_flow_state["history"]:
                  response_text = "Eu sou o Artorias, como posso te ajudar?" 
                  current_flow_state["history"].append({"role": "user", "parts": [{"text": user_message}]})
                  current_flow_state["history"].append({"role": "model", "parts": [{"text": response_text}]})
                  self.conversation_states[user_id] = current_flow_state
                  return response_text 
+            # 2. Respostas Fixas para Perguntas de Identidade/Ajuda
             elif user_message_lower in ["quem é você?", "como você pode me ajudar?", "qual sua função?", "o que você faz?"]:
                  response_text = "Eu sou o Artorias, assistente da Tralhotec. Posso te ajudar com qualificação de leads ou suporte técnico."
                  current_flow_state["history"].append({"role": "user", "parts": [{"text": user_message}]})
                  current_flow_state["history"].append({"role": "model", "parts": [{"text": response_text}]})
                  self.conversation_states[user_id] = current_flow_state
                  return response_text
-            # --- FIM DA LÓGICA DE SAUDAÇÃO FIXA ---
+            # 3. Respostas Fixas para Recusa de Conhecimento Geral
+            elif user_message_lower in ["consegue me dizer os números primos entre 0 e 32?", "me diga os números primos de 1 a 100", "me conte uma piada", "qual a capital da frança?"]: # Exemplos de perguntas de conhecimento geral
+                 response_text = "Desculpe, não consigo ajudar com isso. Minha função é auxiliar com qualificação SDR ou suporte técnico."
+                 current_flow_state["history"].append({"role": "user", "parts": [{"text": user_message}]})
+                 current_flow_state["history"].append({"role": "model", "parts": [{"text": response_text}]})
+                 self.conversation_states[user_id] = current_flow_state
+                 return response_text
+            # --- FIM DA LÓGICA DE RESPOSTAS FIXAS ---
 
             # PROMPT ORGÂNICO E INTELIGENTE: Processar tudo que o usuário der e pedir só o que falta
             system_instruction = (
@@ -121,7 +128,7 @@ class Artoriasbot:
                 f"Sua missão é guiar o usuário pelos fluxos de SDR ou Suporte Técnico. Você deve ser capaz de: \n"
                 f"1.  **Absorver TODAS as informações relevantes** que o usuário fornecer em um único turno (mensagem).\n"
                 f"2.  **Identificar qual a PRÓXIMA informação *FALTANTE*** na sequência do fluxo e pedir APENAS por ela.\n"
-                f"3.  **Gerar os dados em formato de registro (JSON) estruturado** ao final do fluxo, quando todas as informações forem coletadas. O usuário NÃO verá este registro na conversa, apenas a mensagem final.\n" 
+                f"3.  **Gerar o JSON estruturado** ao final do fluxo, quando todas as informações forem coletadas. O usuário NÃO verá este registro na conversa, apenas a mensagem final.\n" 
                 f"4.  Manter um tom profissional e útil, sendo conciso, mas completo na resposta.\n"
                 f"\n"
                 f"--- REGRAS DE FLUXO E COLETA DE DADOS ---\n"
@@ -149,7 +156,7 @@ class Artoriasbot:
                 f"--- COMPORTAMENTO GERAL ---\n"
                 f"1.  **Sempre tente encaixar o usuário em um dos fluxos (SDR ou Suporte).** Se a intenção for clara, comece pelo passo 1 do fluxo. Se o usuário fornecer informações para ambos os fluxos, priorize o SDR.\n"
                 f"2.  **Se o usuário fornecer todas as informações necessárias para um fluxo em um único turno, responda a mensagem final e inclua o JSON na mesma resposta.**\n"
-                f"3.  **Se o usuário desviar ou perguntar algo não relacionado, gentilmente o redirecione ao fluxo, pedindo a próxima informação necessária.**\n"
+                f"3.  **Se o usuário desviar ou perguntar algo não relacionado, responda que não pode ajudar e redirecione-o ao fluxo (como nos exemplos).**\n"
                 f"4.  Se o usuário se despedir ou agradecer, responda cordialmente.\n"
                 f"5.  Se não entender, peça para reformular.\n"
                 f"6.  **Se o usuário perguntar 'o que é JSON' ou sobre o formato dos dados, explique de forma simples e contextualizada (ex: 'É um formato para organizar informações, como um formulário digital').**\n"
@@ -176,69 +183,3 @@ class Artoriasbot:
             
             headers = {"Content-Type": "application/json"}
             payload = {
-                "contents": gemini_contents, # O histórico completo
-                "generationConfig": {
-                    "temperature": self.generation_config["temperature"], 
-                    "maxOutputTokens": self.generation_config["maxOutputTokens"]
-                }
-            }
-            
-            gemini_raw_response = requests.post(gemini_api_url, headers=headers, json=payload)
-            gemini_raw_response.raise_for_status() 
-            
-            gemini_json_response = gemini_raw_response.json()
-            
-            if gemini_json_response and "candidates" in gemini_json_response and gemini_json_response["candidates"]:
-                response_content = gemini_json_response["candidates"][0]["content"]["parts"][0]["text"]
-                
-                response_text = response_content 
-                
-                json_start_tag = "```json"
-                json_end_tag = "```"
-                json_start_index = response_content.find(json_start_tag)
-                json_end_index = response_content.find(json_end_tag, json_start_index + len(json_start_tag)) if json_start_index != -1 else -1
-
-                if json_start_index != -1 and json_end_index != -1:
-                    json_str = response_content[json_start_index + len(json_start_tag):json_end_index].strip()
-                    try:
-                        extracted_data = json.loads(json_str)
-                        print(f"Artoriasbot: JSON extraído: {extracted_data}")
-                        
-                        # --- NOVO: SALVAR DADOS EXTRAÍDOS NO BANCO DE DADOS ---
-                        action_type = extracted_data.get("action", "unknown")
-                        if action_type in ["sdr_completed", "support_escalated"]:
-                            self._save_extracted_data(user_id, extracted_data, action_type) # Chamada para salvar o JSON
-                        # --- FIM DO NOVO ---
-                        
-                        response_text = response_content[:json_start_index].strip()
-                        
-                        if not response_text:
-                            action = extracted_data.get("action", "")
-                            if "sdr_completed" in action:
-                                response_text = "Perfeito! Agradeço as informações. Um dos nossos SDRs entrará em contato em breve para agendar uma conversa com um consultor de vendas."
-                            elif "support_escalated" in action:
-                                response_text = "Obrigado! Sua solicitação de suporte foi encaminhada para nossa equipe. Eles entrarão em contato em breve."
-                            else:
-                                response_text = "Concluído! Agradeço as informações." 
-
-                    except json.JSONDecodeError as e:
-                        print(f"Artoriasbot: ERRO ao parsear JSON: {e}")
-                        extracted_data = {} 
-                
-                # Salvamento de histórico em memória apenas
-                current_flow_state["history"].append({"role": "user", "parts": [{"text": user_message}]})
-                current_flow_state["history"].append({"role": "model", "parts": [{"text": response_text}]})
-
-            else:
-                response_text = "Não consegui gerar uma resposta inteligente no momento. Por favor, tente novamente."
-
-            self.conversation_states[user_id] = current_flow_state
-
-            return response_text
-
-        except Exception as e:
-            print(f"ERRO: Falha ao chamar a API do Gemini: {e}")
-            traceback.print_exc(file=sys.stdout)
-            response_text = "Desculpe, estou com dificuldades técnicas no momento. Por favor, tente novamente mais tarde."
-
-        return response_text
