@@ -3,34 +3,25 @@ import traceback
 import google.generativeai as genai
 import os
 import json
-import requests # <-- Adicionado: Para fazer chamadas HTTP síncronas diretamente
+import requests
 
 class Artoriasbot:
     def __init__(self):
-        self.conversation_states = {} # Histórico em memória apenas
+        self.conversation_states = {} 
 
-        # Configuração da API do Gemini
         gemini_api_key = os.environ.get("GEMINI_API_KEY")
         if not gemini_api_key:
             raise ValueError("GEMINI_API_KEY não configurada nas variáveis de ambiente.")
-        genai.configure(api_key=gemini_api_key) # Apenas configura a chave globalmente
-
-        # Usaremos o nome do modelo e a API key para a chamada requests direta
+        genai.configure(api_key=gemini_api_key)
+        
         self.gemini_model_name = 'gemini-2.0-flash' 
         self.gemini_api_key = gemini_api_key
         
-        # Ajustando parâmetros de geração para serem passados na payload da requisição requests
-        self.generation_config = {"temperature": 0.9, "maxOutputTokens": 500} # Voltar a orgânico
+        self.generation_config = {"temperature": 0.9, "maxOutputTokens": 500} 
 
         print(f"Artoriasbot: Modelo Gemini configurado para {self.gemini_model_name} (orgânico, chamada síncrona).")
 
-    # Métodos de BD removidos, pois não há persistência nesta versão
-    # def _init_db_pool(self): pass
-    # def _load_conversation_history(self, user_id: str) -> list: return []
-    # def _save_conversation_entry(self, user_id: str, role: str, content: str): pass
-    # def _save_extracted_data(self, user_id: str, data: dict, action_type: str): pass
-
-    def process_message(self, user_message: str, user_id: str = "default_user") -> str: # <-- AGORA SÍNCRONO (def)
+    def process_message(self, user_message: str, user_id: str = "default_user") -> str: # Síncrono
         print(f"Artoriasbot: Processando mensagem de '{user_id}': '{user_message}'")
 
         current_flow_state = self.conversation_states.get(user_id, {"state": "initial", "history": []})
@@ -39,6 +30,29 @@ class Artoriasbot:
         extracted_data = {} 
 
         try:
+            # --- Garante a primeira resposta padrão do bot ou respostas exatas para identidade ---
+            user_message_lower = user_message.lower().strip() 
+            
+            if not current_flow_state["history"] and user_message_lower in ["olá", "ola", "oi", "bom dia", "boa tarde", "boa noite"]:
+                 response_text = "Eu sou o Artorias, como posso te ajudar?" 
+                 current_flow_state["history"].append({"role": "user", "parts": [{"text": user_message}]})
+                 current_flow_state["history"].append({"role": "model", "parts": [{"text": response_text}]})
+                 self.conversation_states[user_id] = current_flow_state
+                 return response_text 
+            elif user_message_lower in ["quem é você?", "como você pode me ajudar?", "qual sua função?", "o que você faz?"]:
+                 response_text = "Eu sou o Artorias, assistente da Tralhotec. Posso te ajudar com qualificação de leads ou suporte técnico."
+                 current_flow_state["history"].append({"role": "user", "parts": [{"text": user_message}]})
+                 current_flow_state["history"].append({"role": "model", "parts": [{"text": response_text}]})
+                 self.conversation_states[user_id] = current_flow_state
+                 return response_text
+            elif user_message_lower in ["consegue me dizer os números primos entre 0 e 32?", "me diga os números primos de 1 a 100", "me conte uma piada", "qual a capital da frança?"]: # Exemplos de perguntas de conhecimento geral
+                 response_text = "Desculpe, não consigo ajudar com isso. Minha função é auxiliar com qualificação SDR ou suporte técnico."
+                 current_flow_state["history"].append({"role": "user", "parts": [{"text": user_message}]})
+                 current_flow_state["history"].append({"role": "model", "parts": [{"text": response_text}]})
+                 self.conversation_states[user_id] = current_flow_state
+                 return response_text
+            # --- FIM DA LÓGICA DE RESPOSTAS FIXAS ---
+
             # PROMPT ORGÂNICO E INTELIGENTE: Processar tudo que o usuário der e pedir só o que falta
             system_instruction = (
                 f"Você é Artorias AI, um assistente inteligente para a Tralhotec, uma empresa de soluções de TI.\n" 
@@ -82,32 +96,6 @@ class Artoriasbot:
             # Prepara o histórico para o Gemini na payload da requisição HTTP
             gemini_contents = []
             
-            # --- NOVO: Garante a primeira resposta padrão do bot ou respostas exatas para identidade ---
-            user_message_lower = user_message.lower().strip() 
-            
-            # 1. Saudação Inicial Fixa: Se é a PRIMEIRA interação do usuário (histórico vazio)
-            if not current_flow_state["history"]:
-                 response_text = "Eu sou o Artorias, como posso te ajudar?" 
-                 current_flow_state["history"].append({"role": "user", "parts": [{"text": user_message}]})
-                 current_flow_state["history"].append({"role": "model", "parts": [{"text": response_text}]})
-                 self.conversation_states[user_id] = current_flow_state
-                 return response_text 
-            # 2. Respostas Fixas para Perguntas de Identidade/Ajuda
-            elif user_message_lower in ["quem é você?", "como você pode me ajudar?", "qual sua função?", "o que você faz?"]: 
-                 response_text = "Eu sou o Artorias, assistente da Tralhotec. Posso te ajudar com qualificação de leads ou suporte técnico."
-                 current_flow_state["history"].append({"role": "user", "parts": [{"text": user_message}]})
-                 current_flow_state["history"].append({"role": "model", "parts": [{"text": response_text}]})
-                 self.conversation_states[user_id] = current_flow_state
-                 return response_text
-            # 3. Respostas Fixas para Recusa de Conhecimento Geral
-            elif user_message_lower in ["consegue me dizer os números primos entre 0 e 32?", "me diga os números primos de 1 a 100", "me conte uma piada", "qual a capital da frança?"]: # Exemplos de perguntas de conhecimento geral
-                 response_text = "Desculpe, não consigo ajudar com isso. Minha função é auxiliar com qualificação SDR ou suporte técnico."
-                 current_flow_state["history"].append({"role": "user", "parts": [{"text": user_message}]})
-                 current_flow_state["history"].append({"role": "model", "parts": [{"text": response_text}]})
-                 self.conversation_states[user_id] = current_flow_state
-                 return response_text
-            # --- FIM DA LÓGICA DE RESPOSTAS FIXAS ---
-
             # Adiciona a system_instruction como a primeira parte do "user" role
             gemini_contents.append({"role": "user", "parts": [{"text": system_instruction}]})
             
@@ -157,8 +145,7 @@ class Artoriasbot:
                         action_type = extracted_data.get("action", "unknown")
                         if action_type in ["sdr_completed", "support_escalated"]:
                             # Esta chamada está ativa novamente
-                            # self._save_extracted_data(user_id, extracted_data, action_type) 
-                            pass # Temporariamente desativado para o BD final, mas a chamada está lá.
+                            self._save_extracted_data(user_id, extracted_data, action_type) 
                         # --- FIM DO NOVO ---
                         
                         response_text = response_content[:json_start_index].strip()
