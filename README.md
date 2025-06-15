@@ -1,6 +1,6 @@
 # Artorias AI: Agente Conversacional Inteligente
 
-## 🚀 Visão Geral
+## Visão Geral
 
 O **Artorias AI** é um bot de IA construído em **Python** com **Flask**, utilizando a **API do Google Gemini** para inteligência conversacional. Sua arquitetura **síncrona** garante estabilidade e desempenho.
 
@@ -19,7 +19,7 @@ Ele foi projetado para:
 
 ---
 
-## ✨ Teste o Artorias AI Agora!
+## Teste o Artorias AI Agora!
 
 **Experimente o bot em ação:**
 
@@ -28,7 +28,7 @@ Ele foi projetado para:
 
 ---
 
-## 🛠️ Tecnologias
+## Tecnologias
 
 - **Python**: Linguagem principal.
 - **Flask**: Framework web para a API do bot.
@@ -42,7 +42,7 @@ Ele foi projetado para:
 
 ---
 
-## 💻 Como Rodar Localmente (Desenvolvimento)
+## Como Rodar Localmente (Desenvolvimento)
 
 **Mergulhe no código e experimente o Artorias AI em sua máquina!**
 
@@ -108,7 +108,7 @@ O bot estará rodando localmente em:
 
 ---
 
-## 🧪 Como Testar a API Localmente
+## Como Testar a API Localmente
 
 Com o bot rodando (`python app_flask.py`), envie um POST com:
 
@@ -118,11 +118,11 @@ curl -X POST -H "Content-Type: application/json" -d "{\"text\": \"Olá, Artorias
 
 ---
 
-## 📈 Próximos Passos & Oportunidades Futuras
+## Próximos Passos & Oportunidades Futuras
 
 O **Artorias AI** é uma **prova de conceito poderosa**, com um comportamento refinado e pronto para novas expansões!
 
-- **Persistência de Dados (Prioridade)**: Reintegrar o salvamento do JSON final em um banco de dados (PostgreSQL no Railway), garantindo que os leads sejam armazenados permanentemente para acesso externo, sem a necessidade de o bot "lembrar" o histórico completo da conversa.
+- **Persistência de Dados**: integrar o salvamento do JSON final em um banco de dados (PostgreSQL no Railway), garantindo que os leads sejam armazenados permanentemente para acesso externo, sem a necessidade de o bot "lembrar" o histórico completo da conversa.
 - **Automação Real**: Utilizar os dados salvos para acionar automações (e-mails de notificação, integração com planilhas/CRMs).
 - **Novos Canais**: Expandir a presença do bot para **WhatsApp**, **Slack**, etc.
 - **Contêineres (Docker)**: Empacotar o bot em contêineres para facilitar o deploy e a escalabilidade em qualquer ambiente de nuvem.
