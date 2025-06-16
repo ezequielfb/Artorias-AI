@@ -48,9 +48,10 @@ Você também pode acessar a versão hospedada na web:
 
 ---
 
-## Captura de Tela *(opcional)*
+## Captura de Tela
 
-*Adicione aqui uma imagem ou gif do bot em funcionamento, se quiser.*
+![Print da interface do Artorias AI](Assets/artorias.png)
+
 
 ---
 
