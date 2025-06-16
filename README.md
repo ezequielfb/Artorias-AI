@@ -56,9 +56,7 @@ Você também pode acessar a versão hospedada na web:
 
 ## Melhorias Futuras
 
-- Interface visual com histórico de conversas.
-- Sistema de usuários e autenticação.
-- Integração com canais externos (WhatsApp, Telegram, etc.).
+- Integração com canais externos (e-mail, WhatsApp, Telegram, etc.).
 - Personalização de "personalidade" do bot.
 
 ---
